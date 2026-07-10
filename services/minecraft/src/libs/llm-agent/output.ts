@@ -362,6 +362,29 @@ function estimateVoicePlaybackMs(text: string): number {
   return clampNumber(estimated, VOICE_PLAYBACK_MIN_ESTIMATE_MS, VOICE_PLAYBACK_MAX_ESTIMATE_MS)
 }
 
+/**
+ * Exact playback duration read from the WAV header (data size / byte rate).
+ * Falls back to the character-count estimate for non-WAV payloads.
+ */
+export function measureVoicePlaybackMs(voice: OutputVoicePayload, text: string): number {
+  try {
+    if (voice.mimeType.toLowerCase().includes('wav')) {
+      const bytes = Buffer.from(voice.audio, 'base64')
+      if (bytes.length >= 44 && bytes.toString('ascii', 0, 4) === 'RIFF') {
+        const byteRate = bytes.readUInt32LE(28)
+        const dataSize = bytes.length - 44
+        if (byteRate > 0 && dataSize > 0) {
+          return Math.ceil((dataSize / byteRate) * 1000)
+        }
+      }
+    }
+  }
+  catch {
+    // fall through to the estimate
+  }
+  return estimateVoicePlaybackMs(text)
+}
+
 function clampPositiveInt(value: number, fallback: number): number {
   if (!Number.isFinite(value)) {
     return fallback
@@ -1308,7 +1331,7 @@ async function publishAssistantMessageInternal(
       if (voice.provider !== 'local-tts') {
         registerVoiceGenerationSuccess()
       }
-      const holdMs = estimateVoicePlaybackMs(content) + VOICE_PLAYBACK_MIN_GAP_MS
+      const holdMs = measureVoicePlaybackMs(voice, content) + VOICE_PLAYBACK_MIN_GAP_MS
       voicePlaybackBusyUntil = Math.max(voicePlaybackBusyUntil, Date.now() + holdMs)
       if (options?.onVoiceAttached) {
         try {
@@ -1488,7 +1511,7 @@ export function publishPrerenderedVoiceToAiri(
   getPresentationScheduler().schedule(
     options?.eventAt ?? Date.now(),
     () => {
-      const holdMs = estimateVoicePlaybackMs(content) + VOICE_PLAYBACK_MIN_GAP_MS
+      const holdMs = measureVoicePlaybackMs(voice, content) + VOICE_PLAYBACK_MIN_GAP_MS
       voicePlaybackBusyUntil = Math.max(voicePlaybackBusyUntil, Date.now() + holdMs)
       void writeObsSubtitle(content, logger)
       if (airiClient) {
