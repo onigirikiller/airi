@@ -9,6 +9,7 @@ import { withRetry } from '@moeru/std'
 import { config } from '../../composables/config'
 import { useLogger } from '../../utils/logger'
 import { isLikelyOllamaBaseUrl, unloadOllamaModel, withSerializedGpuTask } from '../gpu-coordinator'
+import { assertOpenAITokenBudget } from '../llm-usage/token-budget'
 
 export abstract class BaseLLMHandler {
   protected logger: Logger
@@ -41,7 +42,11 @@ export abstract class BaseLLMHandler {
       completionOptions.temperature = 0.2
     }
 
-    const reroute = async () => await context.reroute(route, messages, completionOptions) as ChatCompletion | ChatCompletion & { error: { message: string } }
+    const reroute = async () => {
+      const model = String(completionOptions.model || speechModel)
+      assertOpenAITokenBudget(speechBaseUrl, `neuri.${route}`, model)
+      return await context.reroute(route, messages, completionOptions) as ChatCompletion | ChatCompletion & { error: { message: string } }
+    }
     const completion = isLikelyOllamaBaseUrl(speechBaseUrl)
       ? await withSerializedGpuTask(`ollama:handler.${route}`, this.logger, async () => {
           try {

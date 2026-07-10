@@ -8,6 +8,7 @@ import { system, user } from 'neuri/openai'
 
 import { config as appConfig } from '../../composables/config'
 import { isLikelyOllamaBaseUrl, unloadOllamaModel, withSerializedGpuTask } from '../../libs/gpu-coordinator'
+import { assertOpenAITokenBudget } from '../../libs/llm-usage/token-budget'
 import { useLogger } from '../../utils/logger'
 import { generateChatAgentPrompt } from './adapter'
 
@@ -44,9 +45,10 @@ export async function generateChatResponse(
 
     const handleCompletion = async (c: any): Promise<string> => {
       const model = config.model ?? appConfig.speechLlm.model
-      const reroute = async () => await c.reroute('chat', c.messages, {
-        model,
-      })
+      const reroute = async () => {
+        assertOpenAITokenBudget(appConfig.speechLlm.baseUrl, 'neuri.chat', model)
+        return await c.reroute('chat', c.messages, { model })
+      }
       const completion = isLikelyOllamaBaseUrl(appConfig.speechLlm.baseUrl)
         ? await withSerializedGpuTask('ollama:chat-agent', logger, async () => {
             try {

@@ -8,6 +8,7 @@ import { assistant, system, user } from 'neuri/openai'
 
 import { config } from '../../composables/config'
 import { isLikelyOllamaBaseUrl, unloadOllamaModel, withSerializedGpuTask } from '../gpu-coordinator'
+import { assertOpenAITokenBudget, isTokenBudgetError } from '../llm-usage/token-budget'
 import { emitFallbackMonitor } from '../monitor-event-bus'
 
 function hasJapanese(text: string): boolean {
@@ -36,9 +37,12 @@ async function rewriteToJapanese(
       system('あなたは翻訳者です。入力文を自然な日本語に変換し、変換結果だけを返してください。'),
       user(content),
     ]
-    const reroute = async () => await context.reroute('action', rewriteMessages, {
-      model: config.speechLlm.model,
-    }) as ChatCompletion | { error: { message: string } } & ChatCompletion
+    const reroute = async () => {
+      assertOpenAITokenBudget(config.speechLlm.baseUrl, 'llm.completion.rewrite-japanese', config.speechLlm.model)
+      return await context.reroute('action', rewriteMessages, {
+        model: config.speechLlm.model,
+      }) as ChatCompletion | { error: { message: string } } & ChatCompletion
+    }
     const completion = isLikelyOllamaBaseUrl(config.speechLlm.baseUrl)
       ? await withSerializedGpuTask('ollama:completion.rewrite-japanese', logger, async () => {
           try {
@@ -69,6 +73,9 @@ async function rewriteToJapanese(
     }
   }
   catch (error) {
+    if (isTokenBudgetError(error)) {
+      throw error
+    }
     logger.withError(error).warn('Japanese rewrite failed by exception')
   }
 
@@ -80,9 +87,12 @@ export async function handleLLMCompletion(context: NeuriContext, bot: Mineflayer
 
   let completion: ChatCompletion | ({ error: { message: string } } & ChatCompletion)
   try {
-    const reroute = async () => await context.reroute('action', context.messages, {
-      model: config.speechLlm.model,
-    }) as ChatCompletion | ({ error: { message: string } } & ChatCompletion)
+    const reroute = async () => {
+      assertOpenAITokenBudget(config.speechLlm.baseUrl, 'llm.completion.action', config.speechLlm.model)
+      return await context.reroute('action', context.messages, {
+        model: config.speechLlm.model,
+      }) as ChatCompletion | ({ error: { message: string } } & ChatCompletion)
+    }
     completion = isLikelyOllamaBaseUrl(config.speechLlm.baseUrl)
       ? await withSerializedGpuTask('ollama:completion.action', logger, async () => {
           try {

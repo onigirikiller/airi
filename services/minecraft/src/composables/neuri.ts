@@ -7,6 +7,7 @@ import { neuri } from 'neuri'
 import { createActionNeuriAgent } from '../agents/action/adapter'
 import { createChatNeuriAgent } from '../agents/chat/llm'
 import { createPlanningNeuriAgent } from '../agents/planning/adapter'
+import { createTokenBudgetedFetch, isOfficialOpenAIBaseUrl } from '../libs/llm-usage/token-budget'
 import { useLogger } from '../utils/logger'
 import { config } from './config'
 
@@ -29,6 +30,7 @@ function resolveProviderApiKey(): string {
 
 export async function createNeuriAgent(mineflayer: Mineflayer): Promise<Neuri> {
   useLogger().log('Initializing neuri agent')
+  const officialOpenAI = isOfficialOpenAIBaseUrl(config.speechLlm.baseUrl)
   let n = neuri()
 
   agents.add(createPlanningNeuriAgent())
@@ -41,6 +43,9 @@ export async function createNeuriAgent(mineflayer: Mineflayer): Promise<Neuri> {
     provider: {
       apiKey: resolveProviderApiKey(),
       baseURL: config.speechLlm.baseUrl,
+      fetch: officialOpenAI
+        ? createTokenBudgetedFetch(config.speechLlm.baseUrl, 'neuri')
+        : undefined,
     },
   })
 

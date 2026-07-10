@@ -70,13 +70,18 @@ pnpm install
 ```env
 LLM_API_KEY=your_openai_api_key
 LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-5.4-mini
-LLM_REASONING_MODEL=gpt-5.4-mini
+LLM_MODEL=gpt-5.6-terra
+LLM_REASONING_MODEL=gpt-5.6-terra
+LLM_PUBLIC_SPEAK_MODEL=gpt-5.6-luna
 
 AUTONOMY_LLM_ENABLED=true
 AUTONOMY_LLM_API_KEY=your_autonomy_llm_api_key
 AUTONOMY_LLM_BASE_URL=https://api.openai.com/v1
-AUTONOMY_LLM_MODEL=gpt-5.4-mini
+AUTONOMY_LLM_MODEL=gpt-5.6-terra
+
+OPENAI_DAILY_TOKEN_LIMIT=2500000
+OPENAI_DAILY_TOKEN_SOFT_STOP_RATIO=0.9
+OPENAI_ALLOWED_MODELS=gpt-5.6-terra,gpt-5.6-luna
 
 BOT_USERNAME=your_bot_username
 BOT_HOSTNAME=localhost
@@ -84,6 +89,12 @@ BOT_PORT=25565
 BOT_AUTH='microsoft' # comment if you use offline mode
 BOT_VERSION=1.20
 ```
+
+Official `api.openai.com` requests are rejected unless their model is listed in
+`OPENAI_ALLOWED_MODELS`. Usage is persisted by UTC date under the operating
+system temporary directory at `airi-minecraft-state/token-usage.json`. Reaching
+the soft stop ends the bot with exit code `78`; supervisors must not restart it
+until a human starts it after the next UTC daily reset.
 
 ### Local speech + external gameplay example
 

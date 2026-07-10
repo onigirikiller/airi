@@ -9,6 +9,7 @@ import { runInInferenceLane } from '../../autonomy/inference-lane'
 import { config } from '../../composables/config'
 import { withSerializedGpuTask } from '../../libs/gpu-coordinator'
 import { generateWorldStatePrompt } from '../../libs/llm-agent/world-state'
+import { assertOpenAITokenBudget, isTokenBudgetError, recordOpenAIResponseUsage } from '../../libs/llm-usage/token-budget'
 import { emitFallbackMonitor } from '../../libs/monitor-event-bus'
 import { useLogger } from '../../utils/logger'
 
@@ -1057,6 +1058,7 @@ export class PlanningLLMHandler {
       const abortTimer = setTimeout(() => abortController.abort(), requestTimeoutMs)
 
       try {
+        assertOpenAITokenBudget(baseUrl, `planning.${phase}`, model)
         const response = await fetch(endpoint, {
           method: 'POST',
           headers,
@@ -1066,6 +1068,13 @@ export class PlanningLLMHandler {
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => '')
+          recordOpenAIResponseUsage({
+            baseUrl,
+            model,
+            scope: `planning.${phase}`,
+            promptText: JSON.stringify(payload),
+            completionText: errorText,
+          })
           this.logger.withFields({
             phase,
             status: response.status,
@@ -1083,6 +1092,14 @@ export class PlanningLLMHandler {
         }
 
         const data = await response.json() as any
+        recordOpenAIResponseUsage({
+          baseUrl,
+          model,
+          scope: `planning.${phase}`,
+          usage: data?.usage,
+          promptText: JSON.stringify(payload),
+          completionText: JSON.stringify(data),
+        })
         const content = isOllama
           ? (typeof data?.message?.content === 'string' ? data.message.content.trim() : '')
           : isGeminiNative
@@ -1145,6 +1162,9 @@ export class PlanningLLMHandler {
           this.logger.withFields({ attempt }).warn('Parsed plan had 0 valid steps, retrying')
         }
         catch (err) {
+          if (isTokenBudgetError(err)) {
+            throw err
+          }
           this.logger.withFields({
             error: err instanceof Error ? err.message : String(err),
             attempt,

@@ -16,6 +16,11 @@ import { plugin as MineflayerTool } from 'mineflayer-tool'
 import { initBot, initFabricBridge, resetBot } from './composables/bot'
 import { config, initEnv } from './composables/config'
 import { LLMAgent } from './libs/llm-agent'
+import {
+  TOKEN_BUDGET_EXIT_CODE,
+  TOKEN_BUDGET_SHUTDOWN_EVENT,
+  tokenBudgetGuard,
+} from './libs/llm-usage/token-budget'
 import { wrapPlugin } from './libs/mineflayer'
 import { AutonomyPlugin } from './plugins/autonomy'
 import { MonitorDashboardPlugin } from './plugins/monitor-dashboard'
@@ -326,6 +331,11 @@ function closeAiriClient(): void {
 }
 
 async function scheduleRestart(reason: string): Promise<void> {
+  if (process.exitCode === TOKEN_BUDGET_EXIT_CODE) {
+    useLogger().withField('reason', reason).warn('Token budget shutdown is active; suppressing automatic restart')
+    await gracefulShutdown()
+    return
+  }
   if (isRestarting || shuttingDown) {
     return
   }
@@ -463,12 +473,25 @@ async function gracefulShutdown(): Promise<void> {
     instanceLockHeartbeatTimer = undefined
   }
   closeAiriClient()
+  try {
+    tokenBudgetGuard.flushPersistence()
+  }
+  catch (error) {
+    useLogger().withError(error).warn('Failed to flush token budget state during shutdown')
+  }
   releaseInstanceLock(instanceLockPath)
-  exit(0)
+  exit(process.exitCode === TOKEN_BUDGET_EXIT_CODE ? TOKEN_BUDGET_EXIT_CODE : 0)
 }
+
+tokenBudgetGuard.onBlocked(() => {
+  process.exitCode = TOKEN_BUDGET_EXIT_CODE
+  useLogger().error('Token budget exhausted; stopping until next UTC day')
+  void gracefulShutdown()
+})
 
 process.on('SIGINT', () => void gracefulShutdown())
 process.on('SIGTERM', () => void gracefulShutdown())
+;(process.on as (event: string, listener: () => void) => typeof process)(TOKEN_BUDGET_SHUTDOWN_EVENT, () => void gracefulShutdown())
 process.on('exit', () => {
   if (instanceLockHeartbeatTimer) {
     clearInterval(instanceLockHeartbeatTimer)
@@ -497,14 +520,16 @@ process.on('unhandledRejection', (reason) => {
   void scheduleRestart(`unhandledRejection: ${message.slice(0, 200)}`)
 })
 
-main().catch((err: Error) => {
-  if (isInstanceLockError(err)) {
-    useLogger().withError(err).error('Initial startup failed due to active instance lock, exiting for supervisor recovery')
-    closeAiriClient()
-    releaseInstanceLock(instanceLockPath)
-    exit(1)
-  }
+if (!tokenBudgetGuard.getState().blocked) {
+  main().catch((err: Error) => {
+    if (isInstanceLockError(err)) {
+      useLogger().withError(err).error('Initial startup failed due to active instance lock, exiting for supervisor recovery')
+      closeAiriClient()
+      releaseInstanceLock(instanceLockPath)
+      exit(1)
+    }
 
-  useLogger().withError(err).error('Initial startup failed, scheduling restart')
-  void scheduleRestart(`startup-failed: ${err.message}`)
-})
+    useLogger().withError(err).error('Initial startup failed, scheduling restart')
+    void scheduleRestart(`startup-failed: ${err.message}`)
+  })
+}
