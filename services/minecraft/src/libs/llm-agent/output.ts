@@ -6,6 +6,7 @@ import { Buffer } from 'node:buffer'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
+import { getActiveTtsStyleHint } from '../../autonomy/emotion'
 import { config } from '../../composables/config'
 import { withSerializedGpuTask } from '../gpu-coordinator'
 import { emitFallbackMonitor } from '../monitor-event-bus'
@@ -606,12 +607,19 @@ async function generateStyleBertVits2Voice(text: string, logger?: Logger): Promi
 
   const modelId = Math.max(0, Math.trunc(config.localTts.styleBertVits2ModelId))
   const speakerId = Math.max(0, Math.trunc(config.localTts.styleBertVits2SpeakerId))
-  const style = config.localTts.styleBertVits2Style.trim()
-  const styleWeight = clampNumber(config.localTts.styleBertVits2StyleWeight, 0.1, 10.0)
+  // Emotion engine hint modulates voice tone per utterance (fear -> faster,
+  // surprised style, etc.). Falls back to static config when calm.
+  const emotionHint = getActiveTtsStyleHint()
+  const style = (emotionHint?.style ?? config.localTts.styleBertVits2Style).trim()
+  const styleWeight = clampNumber(emotionHint?.styleWeight ?? config.localTts.styleBertVits2StyleWeight, 0.1, 10.0)
   const sdpRatio = clampNumber(config.localTts.styleBertVits2SdpRatio, 0.0, 1.0)
   const noise = clampNumber(config.localTts.styleBertVits2Noise, 0.0, 2.0)
   const noiseW = clampNumber(config.localTts.styleBertVits2NoiseW, 0.0, 2.0)
-  const length = clampNumber(config.localTts.styleBertVits2Length, 0.1, 3.0)
+  const length = clampNumber(
+    config.localTts.styleBertVits2Length * (emotionHint?.lengthScale ?? 1),
+    0.1,
+    3.0,
+  )
   const language = config.localTts.styleBertVits2Language.trim()
 
   const query = new URLSearchParams()

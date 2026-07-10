@@ -33,6 +33,7 @@ import { getNearestEntityWhere } from '../skills/world'
 import { useLogger } from '../utils/logger'
 import { isHostile } from '../utils/mcdata'
 import { GeminiAutonomyDecisionProvider } from './decision-provider'
+import { getActiveEmotionEngine } from './emotion'
 import { runInInferenceLane } from './inference-lane'
 import { retrieveRelevantKnowledge } from './knowledge-retriever'
 import { describeDeathLesson, LessonStore } from './lessons'
@@ -1157,6 +1158,11 @@ export class AutonomousStreamOrchestrator {
       if (lessonLines.length > 0) {
         const lessonsBlock = `--- Lessons from past deaths/failures ---\n${lessonLines.join('\n')}`
         knowledgeSnippet = knowledgeSnippet ? `${knowledgeSnippet}\n\n${lessonsBlock}` : lessonsBlock
+      }
+
+      const emotionLine = getActiveEmotionEngine()?.describeForPrompt()
+      if (emotionLine) {
+        knowledgeSnippet = knowledgeSnippet ? `${knowledgeSnippet}\n\n${emotionLine}` : emotionLine
       }
     }
     catch (err) {
@@ -2474,6 +2480,7 @@ export class AutonomousStreamOrchestrator {
       })
       this.emitSpark('done', `Autonomy completed goal: ${goal}`)
       monitorBus.emitMonitor('orchestrator:goalCompleted', { goal })
+      getActiveEmotionEngine()?.impulse('goal-success')
       this.consecutiveGoalFailures = 0
       this.recordGoalSuccess(goal)
       this.bot.memory?.completeGoal?.(goal, { success: true })
@@ -2501,6 +2508,7 @@ export class AutonomousStreamOrchestrator {
       this.consecutiveGoalFailures++
       this.lastGoalFailureAt = Date.now()
       this.recordGoalFailure(goal, errorMessage)
+      getActiveEmotionEngine()?.impulse('goal-failure')
       if (this.consecutiveGoalFailures >= 2) {
         try {
           const facts = collectWorldFacts(this.bot)

@@ -30,6 +30,8 @@ export type MonitorEventType
     | 'tokenBudget:state'
     | 'reflex:triggered'
     | 'reflex:resolved'
+    | 'emotion:state'
+    | 'quest:state'
 
 export interface MonitorEvent {
   type: MonitorEventType

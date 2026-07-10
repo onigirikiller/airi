@@ -4,6 +4,7 @@ import type { MineflayerWithAgents } from '../libs/llm-agent/types'
 import type { Mineflayer } from '../libs/mineflayer'
 import type { MineflayerPlugin } from '../libs/mineflayer/plugin'
 
+import { EmotionEngine, setActiveEmotionEngine } from '../autonomy/emotion'
 import { AutonomousStreamOrchestrator } from '../autonomy/orchestrator'
 import { ReflexController } from '../autonomy/reflex'
 import { VoiceBank } from '../libs/llm-agent/voice-bank'
@@ -29,13 +30,17 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
 
       reflex = new ReflexController(mineflayer as Mineflayer)
       voiceBank = new VoiceBank(airiClient)
+      const emotion = new EmotionEngine()
+      setActiveEmotionEngine(emotion)
 
       // First scream of the two-tier reaction: instant pre-rendered voice at
       // the reflex moment; the considered LLM commentary follows on its own.
       reflex.on('reflex', (event) => {
+        emotion.impulse(event.kind === 'combat-defense' ? 'combat' : 'danger')
         voiceBank?.play(event.kind, event.at)
       })
       deathReactionHandler = () => {
+        emotion.impulse('death')
         voiceBank?.play('death')
       }
       ;(mineflayer as Mineflayer).bot.on('death', deathReactionHandler)
@@ -68,6 +73,7 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
       reflex?.stop()
       reflex = null
       voiceBank = null
+      setActiveEmotionEngine(undefined)
     },
   }
 }
