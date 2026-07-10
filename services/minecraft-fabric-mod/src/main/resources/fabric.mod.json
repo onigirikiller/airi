@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "airi-mcbridge",
+  "version": "${version}",
+  "name": "AIRI MC Bridge",
+  "description": "WebSocket bridge for AI-controlled Minecraft gameplay",
+  "authors": ["AIRI Project"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["com.airi.mcbridge.AiriMcBridge"]
+  },
+  "mixins": ["airi-mcbridge.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.20.4",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}
