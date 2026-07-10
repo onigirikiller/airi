@@ -144,23 +144,24 @@ export class QuestTracker {
     return state
   }
 
-  private handleMilestoneTransition(milestone: ProgressMilestone): void {
-    if (this.lastMilestone === null) {
-      this.lastMilestone = milestone
-      return
-    }
-    if (milestone === this.lastMilestone) {
-      return
-    }
+  private highestMilestoneIndex = -1
 
-    const previousIndex = MILESTONE_ORDER.indexOf(this.lastMilestone)
+  private handleMilestoneTransition(milestone: ProgressMilestone): void {
     const currentIndex = MILESTONE_ORDER.indexOf(milestone)
-    const advanced = currentIndex > previousIndex
+    if (this.lastMilestone === null) {
+      // Baseline: never celebrate what was already true at startup.
+      this.lastMilestone = milestone
+      this.highestMilestoneIndex = currentIndex
+      return
+    }
     this.lastMilestone = milestone
 
-    if (!advanced) {
+    // Derived milestones flap when nearby-block facts (furnace, crafting
+    // table) fade in and out of range. Celebrate only genuinely new bests.
+    if (currentIndex <= this.highestMilestoneIndex) {
       return
     }
+    this.highestMilestoneIndex = currentIndex
 
     // Chapter break: celebrate on voice bank + emotion, and let the monitor
     // (and any recap commentary listeners) know.

@@ -157,7 +157,15 @@ export class TokenBudgetGuard {
   public recordUsage(input: RecordTokenUsageInput): void {
     this.rotateUtcDayIfNeeded()
     const previousUsed = this.usedToday
-    this.usedToday += normalizeTokenCount(input.promptTokens) + normalizeTokenCount(input.completionTokens)
+    const promptTokens = normalizeTokenCount(input.promptTokens)
+    const completionTokens = normalizeTokenCount(input.completionTokens)
+    this.usedToday += promptTokens + completionTokens
+    this.logger.withFields({
+      scope: input.scope,
+      promptTokens,
+      completionTokens,
+      usedToday: this.usedToday,
+    }).log('OpenAI tokens recorded')
     this.schedulePersistence()
 
     for (const ratio of NOTIFICATION_RATIOS) {
