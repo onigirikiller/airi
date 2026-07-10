@@ -1318,7 +1318,28 @@ export class GeminiAutonomyDecisionProvider implements AutonomyDecisionProvider 
     }
     else {
       payload.reasoning_effort = 'low'
-      payload.response_format = { type: 'json_object' }
+      // Strict structured output: guarantees a parseable intent and removes
+      // the repair-prompt retry round trips from the token budget.
+      payload.response_format = {
+        type: 'json_schema',
+        json_schema: {
+          name: 'autonomy_intent',
+          strict: true,
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              goal: { type: ['string', 'null'], description: 'Actionable goal achievable right now, or null to stay idle' },
+              speak: { type: ['string', 'null'], description: 'Short Japanese line for the stream, or null' },
+              focus: { type: 'string', enum: ['self', 'co-op', 'community'] },
+              confidence: { type: 'number' },
+              reason: { type: 'string' },
+              replyToSignalId: { type: ['string', 'null'] },
+            },
+            required: ['goal', 'speak', 'focus', 'confidence', 'reason', 'replyToSignalId'],
+          },
+        },
+      }
       payload.max_completion_tokens = maxDecisionTokens
     }
 
