@@ -8,6 +8,7 @@ import pathfinderModel from 'mineflayer-pathfinder'
 import { sleep } from '@moeru/std'
 import { Vec3 } from 'vec3'
 
+import { ActionAbortedError, raceWithAbort, throwIfAborted } from '../libs/mineflayer/action-abort'
 import { getBlockId, makeItem } from '../utils/mcdata'
 import { getItemCount, refreshInventoryState } from './actions/inventory'
 import { log } from './base'
@@ -58,6 +59,8 @@ export async function breakBlockAt(
   y: number,
   z: number,
 ): Promise<boolean> {
+  const signal = mineflayer.currentActionSignal
+  throwIfAborted(signal)
   validatePosition(x, y, z)
 
   const block = await getBlockAtAccurate(mineflayer, new Vec3(x, y, z))
@@ -69,6 +72,7 @@ export async function breakBlockAt(
   }
 
   await moveIntoRange(mineflayer, block)
+  throwIfAborted(signal)
 
   if (mineflayer.isCreative) {
     return breakInCreative(mineflayer, block, x, y, z)
@@ -111,6 +115,7 @@ async function moveIntoRange(mineflayer: Mineflayer, block: any) {
       mineflayer.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 3)),
       BLOCK_BREAK_MOVE_TIMEOUT_MS,
       `Pathing to ${block.name} at ${pos.x}, ${pos.y}, ${pos.z}`,
+      mineflayer.currentActionSignal,
       () => mineflayer.bot.pathfinder.stop?.(),
     )
   }
@@ -155,6 +160,7 @@ async function digBlockWithTimeout(
     mineflayer.bot.dig(block, true),
     BLOCK_DIG_TIMEOUT_MS,
     `Digging ${block.name} at ${x}, ${y}, ${z}`,
+    mineflayer.currentActionSignal,
     () => mineflayer.bot.stopDigging?.(),
   )
 }
@@ -163,8 +169,10 @@ async function withTimeout<T>(
   operation: Promise<T>,
   timeoutMs: number,
   label: string,
+  signal: AbortSignal | undefined,
   onTimeout?: () => void,
 ): Promise<T> {
+  throwIfAborted(signal)
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -174,7 +182,9 @@ async function withTimeout<T>(
   })
 
   try {
-    return await Promise.race([operation, timeout])
+    const result = await raceWithAbort(Promise.race([operation, timeout]), signal)
+    throwIfAborted(signal)
+    return result
   }
   finally {
     if (timeoutId) {
@@ -682,6 +692,7 @@ export async function collectBlock(
   })
 
   for (let i = 0; i < num && collected >= 0; i++) {
+    throwIfAborted(mineflayer.currentActionSignal)
     const blocks = getValidBlocks(mineflayer, blocktypes, exclude)
 
     if (blocks.length === 0) {
@@ -768,11 +779,17 @@ async function canHarvestBlock(mineflayer: Mineflayer, block: any, blockType: st
 
 async function tryCollectBlock(mineflayer: Mineflayer, block: any, blockType: string): Promise<boolean> {
   try {
-    await mineflayer.bot.collectBlock.collect(block)
+    const signal = mineflayer.currentActionSignal
+    throwIfAborted(signal)
+    await raceWithAbort(mineflayer.bot.collectBlock.collect(block), signal)
+    throwIfAborted(signal)
     await autoLight(mineflayer)
     return true
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     if (err instanceof Error && err.name === 'NoChests') {
       log(mineflayer, `Failed to collect ${blockType}: Inventory full, no place to deposit.`)
       return false

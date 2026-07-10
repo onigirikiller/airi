@@ -18,6 +18,7 @@ afterEach(() => {
 describe('autonomous stream orchestrator token budget stop', () => {
   it('interrupts active movement and requests a dedicated process shutdown', () => {
     const stopPathfinder = vi.fn()
+    const abortCurrentAction = vi.fn(() => stopPathfinder())
     const emit = vi.fn()
     const orchestrator = new AutonomousStreamOrchestrator({
       username: 'AIra',
@@ -29,6 +30,7 @@ describe('autonomous stream orchestrator token budget stop', () => {
         pathfinder: { stop: stopPathfinder },
         players: {},
       },
+      abortCurrentAction,
       emit,
       memory: {
         actions: [],
@@ -46,6 +48,7 @@ describe('autonomous stream orchestrator token budget stop', () => {
     orchestrator.handleTokenBudgetBlocked()
 
     expect(stopPathfinder).toHaveBeenCalledOnce()
+    expect(abortCurrentAction).toHaveBeenCalledWith('Token budget exhausted')
     expect(emit).toHaveBeenCalledWith('interrupt')
     expect(process.exitCode).toBe(TOKEN_BUDGET_EXIT_CODE)
   })

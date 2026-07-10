@@ -4,10 +4,10 @@ import type { Mineflayer } from '../libs/mineflayer'
 
 import pathfinder from 'mineflayer-pathfinder'
 
-import { sleep } from '@moeru/std'
 import { randomInt } from 'es-toolkit'
 import { Vec3 } from 'vec3'
 
+import { abortableSleep, ActionAbortedError, raceWithAbort, throwIfAborted } from '../libs/mineflayer/action-abort'
 import { emitFallbackMonitor } from '../libs/monitor-event-bus'
 import { useLogger } from '../utils/logger'
 import { matchesEntityQuery, resolveBlockQueryTypes, resolveEntityQueryTypes } from '../utils/query-normalizer'
@@ -155,6 +155,8 @@ async function gotoWithTimeout(
   label: string,
   safetyCheck?: () => string | null,
 ): Promise<void> {
+  const signal = mineflayer.currentActionSignal
+  throwIfAborted(signal)
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined
   let safetyHandle: ReturnType<typeof setInterval> | undefined
   let safetyReject: ((error: Error) => void) | undefined
@@ -191,11 +193,12 @@ async function gotoWithTimeout(
   }
 
   try {
-    await Promise.race([
+    await raceWithAbort(Promise.race([
       mineflayer.bot.pathfinder.goto(goal as any),
       timeoutPromise,
       safetyPromise,
-    ])
+    ]), signal)
+    throwIfAborted(signal)
   }
   finally {
     if (timeoutHandle) {
@@ -251,6 +254,9 @@ export async function goToPosition(
     return true
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     log(mineflayer, `I failed to reach ${x}, ${y}, ${z}: ${(err as Error).message}`)
     return false
   }
@@ -323,6 +329,8 @@ export async function goToPlayer(
   username: string,
   distance = 3,
 ): Promise<boolean> {
+  const signal = mineflayer.currentActionSignal
+  throwIfAborted(signal)
   if (mineflayer.allowCheats) {
     mineflayer.bot.chat(`/tp @s ${username}`)
     log(mineflayer, `Teleported to ${username}.`)
@@ -335,7 +343,8 @@ export async function goToPlayer(
     return false
   }
 
-  await mineflayer.bot.pathfinder.goto(new goals.GoalFollow(player, distance))
+  await raceWithAbort(mineflayer.bot.pathfinder.goto(new goals.GoalFollow(player, distance)), signal)
+  throwIfAborted(signal)
   log(mineflayer, `You have reached ${username}.`)
   return true
 }
@@ -345,6 +354,8 @@ export async function followPlayer(
   username: string,
   distance = 4,
 ): Promise<boolean> {
+  const signal = mineflayer.currentActionSignal
+  throwIfAborted(signal)
   const player = mineflayer.bot.players[username]?.entity
   if (!player) {
     return false
@@ -355,6 +366,7 @@ export async function followPlayer(
   const movements = new Movements(mineflayer.bot)
   mineflayer.bot.pathfinder.setMovements(movements)
   mineflayer.bot.pathfinder.setGoal(new goals.GoalFollow(player, distance), true)
+  throwIfAborted(signal)
 
   mineflayer.once('interrupt', () => {
     mineflayer.bot.pathfinder.stop()
@@ -377,6 +389,7 @@ export async function moveAway(mineflayer: Mineflayer, distance: number): Promis
     let suitableGoal = false
 
     for (let attempt = 0; attempt < MAX_MOVE_AWAY_POSITION_ATTEMPTS; attempt++) {
+      throwIfAborted(mineflayer.currentActionSignal)
       const rand1 = randomInt(0, 2)
       const rand2 = randomInt(0, 2)
       const bigRand1 = randomInt(0, 101)
@@ -404,6 +417,7 @@ export async function moveAway(mineflayer: Mineflayer, distance: number): Promis
       ]
 
       for (const offset of fallbackOffsets) {
+        throwIfAborted(mineflayer.currentActionSignal)
         const fallbackX = Math.floor(pos.x + offset.x)
         const fallbackZ = Math.floor(pos.z + offset.z)
         if (await hasSafeMoveAwaySupport(mineflayer, fallbackX, Math.floor(pos.y), fallbackZ, submerged, underground)) {
@@ -472,10 +486,13 @@ export async function moveAway(mineflayer: Mineflayer, distance: number): Promis
     )
     const newPos = mineflayer.bot.entity.position
     logger.log(`I moved away from nearest entity to ${newPos}.`)
-    await sleep(500)
+    await abortableSleep(500, mineflayer.currentActionSignal)
     return true
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     logger.log(`I failed to move away: ${(err as Error).message}`)
     return false
   }
@@ -524,10 +541,13 @@ export async function moveToHorizontalTarget(
     )
     const newPos = mineflayer.bot.entity.position
     logger.log(`I moved toward relocation target ${Math.floor(x)}, ${Math.floor(z)} and reached ${newPos}.`)
-    await sleep(500)
+    await abortableSleep(500, mineflayer.currentActionSignal)
     return true
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     logger.log(`I failed to move toward relocation target: ${(err as Error).message}`)
     return false
   }
@@ -541,9 +561,12 @@ export async function swimUpward(
 
   try {
     mineflayer.bot.setControlState('jump', true)
-    await sleep(durationMs)
+    await abortableSleep(durationMs, mineflayer.currentActionSignal)
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     logger.log(`I failed to swim upward: ${(err as Error).message}`)
     return false
   }
@@ -590,6 +613,7 @@ export async function swimTowardPositionManual(
 
   try {
     while (Date.now() - startTime < timeoutMs) {
+      throwIfAborted(mineflayer.currentActionSignal)
       const currentPosition = mineflayer.bot.entity.position
       const currentVec = toVec3(currentPosition)
       const distance = currentVec.distanceTo(target)
@@ -626,7 +650,7 @@ export async function swimTowardPositionManual(
         mineflayer.bot.setControlState('right', alternatingStrafe === 'right' || deltaYaw < -0.35)
       }
 
-      await sleep(MANUAL_SWIM_TICK_MS)
+      await abortableSleep(MANUAL_SWIM_TICK_MS, mineflayer.currentActionSignal)
 
       const nextPosition = toVec3(mineflayer.bot.entity.position)
       const movedBy = nextPosition.distanceTo(lastPosition)
@@ -646,6 +670,9 @@ export async function swimTowardPositionManual(
     }
   }
   catch (err) {
+    if (err instanceof ActionAbortedError) {
+      throw err
+    }
     logger.log(`Manual swim failed: ${(err as Error).message}`)
     return false
   }
@@ -666,7 +693,10 @@ export async function moveAwayFromEntity(
 ): Promise<boolean> {
   const goal = new goals.GoalFollow(entity, distance)
   const invertedGoal = new goals.GoalInvert(goal)
-  await mineflayer.bot.pathfinder.goto(invertedGoal)
+  const signal = mineflayer.currentActionSignal
+  throwIfAborted(signal)
+  await raceWithAbort(mineflayer.bot.pathfinder.goto(invertedGoal), signal)
+  throwIfAborted(signal)
   return true
 }
 
@@ -675,7 +705,7 @@ export async function stay(mineflayer: Mineflayer, seconds = 30): Promise<boolea
   const targetTime = seconds === -1 ? Infinity : start + seconds * 1000
 
   while (Date.now() < targetTime) {
-    await sleep(500)
+    await abortableSleep(500, mineflayer.currentActionSignal)
   }
 
   log(mineflayer, `I stayed for ${(Date.now() - start) / 1000} seconds.`)
@@ -716,9 +746,14 @@ export async function goToBed(mineflayer: Mineflayer): Promise<boolean> {
   }
 
   try {
+    throwIfAborted(mineflayer.currentActionSignal)
     await mineflayer.bot.sleep(bed)
+    throwIfAborted(mineflayer.currentActionSignal)
   }
   catch (error) {
+    if (error instanceof ActionAbortedError) {
+      throw error
+    }
     log(mineflayer, `I could not sleep in the bed: ${(error as Error).message}`)
     return false
   }
@@ -726,6 +761,7 @@ export async function goToBed(mineflayer: Mineflayer): Promise<boolean> {
 
   const sleepStartedAt = Date.now()
   while (mineflayer.bot.isSleeping) {
+    throwIfAborted(mineflayer.currentActionSignal)
     if (Date.now() - sleepStartedAt > GO_TO_BED_SLEEP_TIMEOUT_MS) {
       try {
         if (typeof (mineflayer.bot as any).wake === 'function') {
@@ -738,7 +774,7 @@ export async function goToBed(mineflayer: Mineflayer): Promise<boolean> {
       log(mineflayer, 'Sleeping timed out before wake-up was observed.')
       return false
     }
-    await sleep(500)
+    await abortableSleep(500, mineflayer.currentActionSignal)
   }
 
   log(mineflayer, 'I have woken up.')

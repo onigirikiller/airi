@@ -23,6 +23,7 @@ export type MonitorEventType
     | 'action:started'
     | 'action:completed'
     | 'action:failed'
+    | 'action:interrupted'
     | 'action:timeout'
     | 'llm:requestSent'
     | 'llm:responseReceived'

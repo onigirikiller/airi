@@ -38,7 +38,7 @@ export interface MemoryAgent extends BaseAgent {
 export interface Plan {
   goal: string
   steps: PlanStep[]
-  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'interrupted'
   requiresAction: boolean
 }
 

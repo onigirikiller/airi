@@ -8,6 +8,7 @@ import type { PlanStep } from './adapter'
 
 import recipeKnowledge from '../../autonomy/knowledge/recipes.json'
 
+import { ActionAbortedError } from '../../libs/mineflayer/action-abort'
 import { AbstractAgent } from '../../libs/mineflayer/base-agent'
 import { emitFallbackMonitor, monitorBus } from '../../libs/monitor-event-bus'
 import { getActualItemCount, getCanonicalInventorySnapshot } from '../../skills/actions/inventory'
@@ -685,6 +686,9 @@ export class PlanningAgentImpl extends AbstractAgent implements PlanningAgent {
             }
           }
           catch (stepError) {
+            if (stepError instanceof ActionAbortedError) {
+              throw stepError
+            }
             const errorMessage = stepError instanceof Error ? stepError.message : String(stepError)
             const failureClass = this.classifyStepFailureClass(errorMessage)
             monitorBus.emitMonitor('planning:stepFailed', { step: { tool: step.tool, description: step.description }, index: stepIndex, error: errorMessage })
@@ -742,6 +746,18 @@ export class PlanningAgentImpl extends AbstractAgent implements PlanningAgent {
       monitorBus.emitMonitor('planning:completed', { goal: plan.goal, status: plan.status })
     }
     catch (error) {
+      if (error instanceof ActionAbortedError) {
+        plan.status = 'interrupted'
+        if (this.currentPlan) {
+          this.currentPlan.status = 'interrupted'
+        }
+        monitorBus.emitMonitor('planning:completed', {
+          goal: plan.goal,
+          status: 'interrupted',
+          reason: error.reason,
+        })
+        throw error
+      }
       plan.status = 'failed'
       monitorBus.emitMonitor('planning:completed', { goal: plan.goal, status: 'failed', error: error instanceof Error ? error.message : String(error) })
       throw error

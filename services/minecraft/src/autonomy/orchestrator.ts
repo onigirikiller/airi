@@ -448,7 +448,7 @@ export class AutonomousStreamOrchestrator {
     this.tokenBudgetShutdownRequested = true
 
     try {
-      (this.bot.bot as any).pathfinder?.stop?.()
+      this.bot.abortCurrentAction('Token budget exhausted')
     }
     catch {
       /* noop */
@@ -629,7 +629,7 @@ export class AutonomousStreamOrchestrator {
       if (this.consecutiveTickErrors >= 5) {
         this.logger.warn('Too many consecutive tick errors, force-resetting execution state')
         try {
-          (this.bot.bot as any).pathfinder?.stop?.()
+          this.bot.abortCurrentAction('Orchestrator force-reset after consecutive tick errors')
         }
         catch {
           /* noop */
@@ -687,7 +687,7 @@ export class AutonomousStreamOrchestrator {
         reason: this.pendingRecoveryPlan.reason,
       }).warn('Interrupting the current execution to prioritize deterministic recovery')
       try {
-        (this.bot.bot as any).pathfinder?.stop?.()
+        this.bot.abortCurrentAction(`Deterministic recovery requested: ${this.pendingRecoveryPlan.reason}`)
       }
       catch {
         /* noop */
@@ -713,7 +713,7 @@ export class AutonomousStreamOrchestrator {
         activeGoal: this.activeGoal,
       }).warn('Execution watchdog triggered: force-resetting stuck execution')
       try {
-        (this.bot.bot as any).pathfinder?.stop?.()
+        this.bot.abortCurrentAction(`Execution watchdog exceeded ${EXECUTION_WATCHDOG_TIMEOUT_MS}ms`)
       }
       catch {
         /* noop */

@@ -5,6 +5,7 @@ import type { Recipe } from 'prismarine-recipe'
 import type { Mineflayer } from '../libs/mineflayer'
 import type { CraftIngredientRequirement } from '../utils/crafting-recipe-hints'
 
+import { abortableSleep, ActionAbortedError, throwIfAborted } from '../libs/mineflayer/action-abort'
 import { getFallbackCraftRecipeRequirements } from '../utils/crafting-recipe-hints'
 import { useLogger } from '../utils/logger'
 import { getItemIdForBot, getItemName } from '../utils/mcdata'
@@ -229,6 +230,7 @@ async function openFurnaceWithRetries(
   let lastError: Error | null = null
 
   for (let attempt = 0; attempt < FURNACE_OPEN_RETRY_ATTEMPTS; attempt++) {
+    throwIfAborted(mineflayer.currentActionSignal)
     const reachedFurnace = await moveWithinInteractionDistance(
       mineflayer,
       targetFurnace,
@@ -247,6 +249,9 @@ async function openFurnaceWithRetries(
       return { furnaceBlock: targetFurnace, furnace }
     }
     catch (error) {
+      if (error instanceof ActionAbortedError) {
+        throw error
+      }
       lastError = error instanceof Error ? error : new Error(String(error))
       if (
         !/furnace screen did not open/i.test(lastError.message)
@@ -268,7 +273,7 @@ async function openFurnaceWithRetries(
       }
 
       targetFurnace = refreshedTarget ?? targetFurnace
-      await new Promise(resolve => setTimeout(resolve, FURNACE_OPEN_RETRY_DELAY_MS))
+      await abortableSleep(FURNACE_OPEN_RETRY_DELAY_MS, mineflayer.currentActionSignal)
     }
   }
 
@@ -1331,6 +1336,7 @@ export async function smeltItem(
   num = 1,
   options?: SmeltItemOptions,
 ): Promise<boolean> {
+  throwIfAborted(mineflayer.currentActionSignal)
   itemName = itemName.trim().toLowerCase().replace(/^minecraft:/, '').replace(/\s+/g, '_')
   if (isGenericLogItemQuery(itemName)) {
     const concreteLogItemName = resolveGenericLogSmeltInput(mineflayer)
@@ -1375,6 +1381,9 @@ export async function smeltItem(
     openResult = await openFurnaceWithRetries(mineflayer, furnaceBlock)
   }
   catch (error) {
+    if (error instanceof ActionAbortedError) {
+      throw error
+    }
     logger.log(error instanceof Error ? error.message : String(error))
     if (!placedFurnace && getInventoryCounts(mineflayer).furnace > 0) {
       logger.log('Selected furnace could not be opened; placing a dedicated furnace for smelting instead.')
@@ -1385,6 +1394,9 @@ export async function smeltItem(
           openResult = await openFurnaceWithRetries(mineflayer, dedicatedFurnace)
         }
         catch (retryError) {
+          if (retryError instanceof ActionAbortedError) {
+            throw retryError
+          }
           logger.log(retryError instanceof Error ? retryError.message : String(retryError))
           await cleanupPortableFurnace(mineflayer, placedFurnace)
           return false
@@ -1418,6 +1430,7 @@ export async function smeltItem(
     && inputItem.type !== itemId
     && inputItem.count > 0
   ) {
+    throwIfAborted(mineflayer.currentActionSignal)
     const busyInputName = getItemName(inputItem.type)
     logger.log(
       `The furnace is currently smelting ${busyInputName}.`,
@@ -1449,6 +1462,9 @@ export async function smeltItem(
       openResult = await openFurnaceWithRetries(mineflayer, furnaceBlock)
     }
     catch (error) {
+      if (error instanceof ActionAbortedError) {
+        throw error
+      }
       logger.log(error instanceof Error ? error.message : String(error))
       await cleanupPortableFurnace(mineflayer, placedFurnace)
       return false
@@ -1540,6 +1556,7 @@ export async function smeltItem(
   const collectReadyOutput = async (): Promise<number> => {
     let collectedThisCheck = 0
     while (true) {
+      throwIfAborted(mineflayer.currentActionSignal)
       const readyOutput = furnace.outputItem()
       const readyCount = getFurnaceItemCount(readyOutput, {
         expectedTypeId: outputItemId,
@@ -1568,14 +1585,15 @@ export async function smeltItem(
     return collectedThisCheck
   }
 
-  await new Promise(resolve => setTimeout(resolve, SMELT_SETTLE_DELAY_MS))
+  await abortableSleep(SMELT_SETTLE_DELAY_MS, mineflayer.currentActionSignal)
   await collectReadyOutput()
   while (true) {
+    throwIfAborted(mineflayer.currentActionSignal)
     if (total >= targetCollectCount) {
       break
     }
 
-    await new Promise(resolve => setTimeout(resolve, SMELT_CHECK_INTERVAL_MS))
+    await abortableSleep(SMELT_CHECK_INTERVAL_MS, mineflayer.currentActionSignal)
     // Refresh cached slot data for FabricBridge furnace wrapper
     if (typeof (furnace as any).refresh === 'function') {
       await (furnace as any).refresh()

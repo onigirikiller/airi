@@ -199,7 +199,8 @@ export async function attackEntity(
   const startedAt = Date.now()
   let lastProgressAt = startedAt
   let bestDistance = mineflayer.bot.entity.position.distanceTo(pos)
-  let lastPursuitAt = 0
+  // Allow the initial pursuit immediately, including under fake clocks that begin at zero.
+  let lastPursuitAt = Number.NEGATIVE_INFINITY
   const noProgressTimeoutMs = aquaticTarget
     ? AQUATIC_ATTACK_NO_PROGRESS_TIMEOUT_MS
     : ATTACK_ENTITY_NO_PROGRESS_TIMEOUT_MS

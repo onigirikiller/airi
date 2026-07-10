@@ -2,6 +2,7 @@ import type { Mineflayer } from '../../libs/mineflayer'
 
 import { sleep } from '@moeru/std'
 
+import { abortableSleep, ActionAbortedError, raceWithAbort, throwIfAborted } from '../../libs/mineflayer/action-abort'
 import { useLogger } from '../../utils/logger'
 import { getNearestBlocksAccurate, isBlockExposedAccurate } from '../block-access'
 import { craftRecipe, getLastCraftRecipeDiagnostic, getSelectedCraftRecipeRequirements, smeltItem } from '../crafting'
@@ -77,15 +78,18 @@ function getCobblestoneSearchRange(baseDistance: number, attempt: number): numbe
   return searchRanges[Math.min(attemptIndex, searchRanges.length - 1)] ?? Math.max(baseDistance, 64)
 }
 
-async function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+async function withTimeout<T>(task: Promise<T>, timeoutMs: number, label: string, signal: AbortSignal | undefined): Promise<T> {
+  throwIfAborted(signal)
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   try {
-    return await Promise.race([
+    const result = await raceWithAbort(Promise.race([
       task,
       new Promise<T>((_, reject) => {
         timeoutHandle = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
       }),
-    ])
+    ]), signal)
+    throwIfAborted(signal)
+    return result
   }
   finally {
     if (timeoutHandle) {
@@ -1682,6 +1686,7 @@ export async function ensureCampfire(mineflayer: Mineflayer): Promise<boolean> {
 
 // Helper function to gather cobblestone
 export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblestone: number, maxDistance: number = 4): Promise<boolean> {
+  throwIfAborted(mineflayer.currentActionSignal)
   let cobblestoneCount = getItemCount(mineflayer, 'cobblestone')
   if (cobblestoneCount >= requiredCobblestone) {
     return true
@@ -1705,6 +1710,7 @@ export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblest
   let baritoneFallbackUsed = false
 
   while (cobblestoneCount < requiredCobblestone && attempts < MAX_COBBLESTONE_GATHER_ATTEMPTS) {
+    throwIfAborted(mineflayer.currentActionSignal)
     attempts++
     logger.log('Bot: Gathering more cobblestone...')
     const beforeCount = cobblestoneCount
@@ -1722,20 +1728,23 @@ export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblest
     if (hasBaritoneMine && !baritoneFallbackUsed) {
       logger.log('Bot: Using baritone to mine stone (preferred path)...')
       try {
-        const mined = await Promise.race<boolean>([
+        const mined = await raceWithAbort(Promise.race<boolean>([
           pathfinder!.mine!(['stone', 'cobblestone']),
-          sleep(BARITONE_STONE_MINING_TIMEOUT_MS).then(() => false),
-        ])
+          abortableSleep(BARITONE_STONE_MINING_TIMEOUT_MS, mineflayer.currentActionSignal).then(() => false),
+        ]), mineflayer.currentActionSignal)
         if (!mined) {
           logger.warn('Bot: Baritone stone mining did not complete; trying collectBlock fallback.')
         }
       }
       catch (err) {
+        if (err instanceof ActionAbortedError) {
+          throw err
+        }
         logger.withFields({ error: err instanceof Error ? err.message : String(err) })
           .warn('Bot: Baritone stone mining threw (likely timeout); checking inventory for partial progress.')
       }
       // Always refresh inventory — baritone may have mined some blocks before timeout
-      await sleep(2000)
+      await abortableSleep(2000, mineflayer.currentActionSignal)
       await refreshInventoryState(mineflayer)
       cobblestoneCount = getItemCount(mineflayer, 'cobblestone')
       logger.log(`Bot: After baritone stone mining, cobblestone count: ${cobblestoneCount}`)
@@ -1757,6 +1766,7 @@ export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblest
         ),
         COLLECT_BLOCK_ATTEMPT_TIMEOUT_MS,
         'collect cobblestone attempt',
+        mineflayer.currentActionSignal,
       )
       if (!success) {
         noProgressAttempts++
@@ -1776,6 +1786,9 @@ export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblest
       }
     }
     catch (err) {
+      if (err instanceof ActionAbortedError) {
+        throw err
+      }
       if (err instanceof Error && err.message.includes('right tools')) {
         await ensurePickaxe(mineflayer)
         continue
@@ -1823,6 +1836,7 @@ export async function ensureCobblestone(mineflayer: Mineflayer, requiredCobblest
 }
 
 export async function ensureCoal(mineflayer: Mineflayer, neededAmount: number, maxDistance: number = 4): Promise<boolean> {
+  throwIfAborted(mineflayer.currentActionSignal)
   logger.log('Bot: Checking for coal or charcoal...')
   let coalCount = getCoalLikeFuelCount(mineflayer)
   if (coalCount >= neededAmount) {
@@ -1839,6 +1853,7 @@ export async function ensureCoal(mineflayer: Mineflayer, neededAmount: number, m
   let noProgressAttempts = 0
 
   while (coalCount < neededAmount && attempts < MAX_COAL_GATHER_ATTEMPTS) {
+    throwIfAborted(mineflayer.currentActionSignal)
     attempts++
     const beforeCount = coalCount
 
@@ -1885,6 +1900,9 @@ export async function ensureCoal(mineflayer: Mineflayer, neededAmount: number, m
       }
     }
     catch (err) {
+      if (err instanceof ActionAbortedError) {
+        throw err
+      }
       if (err instanceof Error && err.message.includes('right tools')) {
         await ensurePickaxe(mineflayer)
         continue
@@ -1897,7 +1915,7 @@ export async function ensureCoal(mineflayer: Mineflayer, neededAmount: number, m
     }
 
     // Wait for item pickup + refresh inventory to ensure FabricBridge has synced
-    await sleep(500)
+    await abortableSleep(500, mineflayer.currentActionSignal)
     await refreshInventoryState(mineflayer)
     coalCount = getCoalLikeFuelCount(mineflayer)
     if (coalCount <= beforeCount) {
@@ -2446,6 +2464,7 @@ async function ensureTool(mineflayer: Mineflayer, toolType: ToolType, quantity: 
 
 async function recoverPickaxeFromWood(mineflayer: Mineflayer, quantity: number): Promise<boolean> {
   for (let attempt = 0; attempt < MAX_PICKAXE_RECOVERY_ATTEMPTS; attempt++) {
+    throwIfAborted(mineflayer.currentActionSignal)
     const moveDistance = 24 + (attempt * 16)
     const searchDistance = 80 + (attempt * 32)
 
@@ -2602,12 +2621,15 @@ export async function hasResourcesForTool(
 
 // Ensure a pickaxe
 export async function ensurePickaxe(mineflayer: Mineflayer, quantity: number = 1): Promise<boolean> {
+  throwIfAborted(mineflayer.currentActionSignal)
   const recoveredFromNearbyDrops = await recoverPickaxeInputsFromNearbyDrops(mineflayer, quantity)
+  throwIfAborted(mineflayer.currentActionSignal)
   if (recoveredFromNearbyDrops) {
     return true
   }
 
   const ensured = await ensureTool(mineflayer, 'pickaxe', quantity)
+  throwIfAborted(mineflayer.currentActionSignal)
   if (ensured) {
     return true
   }

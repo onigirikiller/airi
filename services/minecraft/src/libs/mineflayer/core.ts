@@ -10,6 +10,7 @@ import mineflayer from 'mineflayer'
 
 import { useLogg } from '@guiiai/logg'
 
+import { ActionAbortedError, stopActiveBotAction } from './action-abort'
 import { parseCommand } from './command'
 import { Components } from './components'
 import { Health } from './health'
@@ -40,6 +41,8 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
   private commands: Map<string, EventsHandler<'command'>> = new Map()
   private ticker: Ticker = new Ticker()
   private chatCommandHandler: ((username: string, message: string) => void) | null = null
+  private currentActionController: AbortController | undefined
+  private currentActionLabel: string | undefined
 
   constructor(options: MineflayerOptions) {
     super()
@@ -193,6 +196,43 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
     this.ticker.on(event, cb)
   }
 
+  public get currentActionSignal(): AbortSignal | undefined {
+    return this.currentActionController?.signal
+  }
+
+  /** Starts an exclusive action, interrupting any older action before publishing its signal. */
+  public beginAction(label: string): AbortSignal {
+    if (this.currentActionController) {
+      this.abortCurrentAction(`Superseded by action: ${label}`)
+    }
+
+    const controller = new AbortController()
+    controller.signal.addEventListener('abort', () => stopActiveBotAction(this.bot), { once: true })
+    this.currentActionController = controller
+    this.currentActionLabel = label
+    return controller.signal
+  }
+
+  /** Physically stops and aborts the currently executing action. */
+  public abortCurrentAction(reason: string): void {
+    const controller = this.currentActionController
+    if (!controller || controller.signal.aborted) {
+      return
+    }
+
+    this.logger.withFields({ action: this.currentActionLabel ?? '', reason }).log('Aborting current action')
+    controller.abort(new ActionAbortedError(reason))
+  }
+
+  /** Clears an action only when the completing caller still owns the active signal. */
+  public completeAction(signal: AbortSignal): void {
+    if (this.currentActionController?.signal !== signal) {
+      return
+    }
+    this.currentActionController = undefined
+    this.currentActionLabel = undefined
+  }
+
   public getBridgeDebugState(): Record<string, unknown> | null {
     const bridgeStateGetter = (this.bot as any)?.getBridgeDebugState
     if (typeof bridgeStateGetter !== 'function') {
@@ -222,6 +262,7 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
   }
 
   public async stop() {
+    this.abortCurrentAction('Mineflayer stopping')
     this.ticker.stop()
     for (const plugin of this.options?.plugins || []) {
       if (plugin.beforeCleanup) {

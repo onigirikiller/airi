@@ -4,6 +4,7 @@ import type { ActionAgent, AgentConfig } from '../../libs/mineflayer/base-agent'
 import type { PlanStep } from '../planning/adapter'
 
 import { buildWorldStateSnapshot } from '../../libs/llm-agent/world-state'
+import { ActionAbortedError, raceWithAbort, throwIfAborted } from '../../libs/mineflayer/action-abort'
 import { AbstractAgent } from '../../libs/mineflayer/base-agent'
 import { monitorBus } from '../../libs/monitor-event-bus'
 import {
@@ -803,13 +804,16 @@ export class ActionAgentImpl extends AbstractAgent implements ActionAgent {
     this.updateActionState(true, step.description)
     monitorBus.emitMonitor('action:started', { tool: step.tool, description: step.description, params: step.params })
 
+    const actionSignal = this.mineflayer.beginAction(`${step.tool}: ${step.description}`)
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null
     const timeoutMs = getActionTimeoutMs(step)
 
     try {
+      throwIfAborted(actionSignal)
       const capabilitySnapshotHash = String((this.mineflayer.getBridgeDebugState?.() as Record<string, any> | null)?.capabilitySnapshot?.capabilityHash ?? '')
       if (isInventoryManagedAction(step)) {
         const preflight = await preflightInventoryForAction(this.mineflayer, step)
+        throwIfAborted(actionSignal)
         this.logger.withFields({
           action_name: step.tool,
           capability_snapshot_hash: capabilitySnapshotHash,
@@ -824,18 +828,18 @@ export class ActionAgentImpl extends AbstractAgent implements ActionAgent {
       }
 
       const before = await captureActionSnapshot(this.mineflayer)
-      // Execute action with timeout to prevent pathfinder hangs
+      throwIfAborted(actionSignal)
+      // Execute action with a timeout that aborts the underlying skill loop and physical primitives.
       const actionPromise = action.perform(this.mineflayer)(...Object.values(step.params))
-      const timeoutPromise = new Promise<never>((_resolve, reject) => {
-        timeoutHandle = setTimeout(() => {
-          reject(new Error(`Action "${step.tool}" timed out after ${timeoutMs / 1000}s`))
-        }, timeoutMs)
-      })
+      timeoutHandle = setTimeout(() => {
+        this.mineflayer.abortCurrentAction(`Action "${step.tool}" timed out after ${timeoutMs / 1000}s`)
+      }, timeoutMs)
 
-      const result = await Promise.race([actionPromise, timeoutPromise])
+      const result = await raceWithAbort(Promise.resolve(actionPromise), actionSignal)
       if (timeoutHandle) {
         clearTimeout(timeoutHandle)
       }
+      throwIfAborted(actionSignal)
       const after = await captureActionSnapshot(this.mineflayer)
       if (isInventoryManagedAction(step)) {
         const postflight = await verifyInventoryPostflight(this.mineflayer, step)
@@ -900,20 +904,24 @@ export class ActionAgentImpl extends AbstractAgent implements ActionAgent {
       })
     }
     catch (error) {
+      if (error instanceof ActionAbortedError) {
+        const isTimeout = error.reason.includes('timed out')
+        monitorBus.emitMonitor(isTimeout ? 'action:timeout' : 'action:interrupted', {
+          tool: step.tool,
+          error: error.message,
+          reason: error.reason,
+        })
+        this.logger.withError(error).warn(isTimeout ? 'Action timed out and was aborted' : 'Action interrupted')
+        throw error
+      }
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      this.mineflayer.abortCurrentAction(`Action failed: ${errorMsg}`)
       try {
         this.mineflayer.emit?.('interrupt')
       }
       catch {
         // best-effort cleanup
       }
-      // Stop pathfinder on any error to prevent stuck state
-      try {
-        (this.mineflayer.bot as any).pathfinder?.stop?.()
-      }
-      catch {
-        // best-effort cleanup
-      }
-      const errorMsg = error instanceof Error ? error.message : String(error)
       const isTimeout = errorMsg.includes('timed out')
       const inventoryFailureMatch = errorMsg.match(/\(([^)]+)\)/)
       const failureClass = errorMsg.startsWith('Inventory ')
@@ -966,6 +974,7 @@ export class ActionAgentImpl extends AbstractAgent implements ActionAgent {
       if (timeoutHandle) {
         clearTimeout(timeoutHandle)
       }
+      this.mineflayer.completeAction(actionSignal)
       this.updateActionState(false)
     }
   }

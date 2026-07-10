@@ -4,8 +4,7 @@ import type { Mineflayer } from '../../libs/mineflayer'
 
 import pathfinder from 'mineflayer-pathfinder'
 
-import { sleep } from '@moeru/std'
-
+import { abortableSleep, ActionAbortedError, raceWithAbort, throwIfAborted } from '../../libs/mineflayer/action-abort'
 import { useLogger } from '../../utils/logger'
 import { getBlockTool } from '../../utils/mcdata'
 import { normalizeQueryToken, resolveBlockQueryTypes } from '../../utils/query-normalizer'
@@ -306,6 +305,7 @@ async function findShallowStoneProbeCandidate(
 
 async function clearShallowStoneCover(mineflayer: Mineflayer, candidate: ShallowStoneProbeCandidate): Promise<void> {
   for (const coverBlock of candidate.coverBlocks) {
+    throwIfAborted(mineflayer.currentActionSignal)
     const currentCover = await getBlockAtAccurate(mineflayer, coverBlock.position)
     if (!currentCover) {
       throw new Error('Shallow stone cover disappeared before mining.')
@@ -383,6 +383,7 @@ export async function collectBlock(
   let diggingTimeouts = 0
 
   while (collected < num) {
+    throwIfAborted(mineflayer.currentActionSignal)
     if (targetAttempts >= MAX_TARGET_ATTEMPTS_PER_CALL) {
       logger.withFields({
         blockType,
@@ -462,6 +463,7 @@ export async function collectBlock(
     let abortedForDigging = false
 
     for (const candidate of candidates) {
+      throwIfAborted(mineflayer.currentActionSignal)
       const block = candidate.block
       targetAttempts++
       if (targetAttempts > MAX_TARGET_ATTEMPTS_PER_CALL) {
@@ -529,7 +531,10 @@ export async function collectBlock(
           block.position.z,
           4,
         )
-        await mineflayer.bot.pathfinder.goto(goal)
+        const signal = mineflayer.currentActionSignal
+        throwIfAborted(signal)
+        await raceWithAbort(mineflayer.bot.pathfinder.goto(goal), signal)
+        throwIfAborted(signal)
 
         if (candidate.prepareBeforeMining) {
           await candidate.prepareBeforeMining()
@@ -558,6 +563,9 @@ export async function collectBlock(
         break
       }
       catch (err) {
+        if (err instanceof ActionAbortedError) {
+          throw err
+        }
         logger.log(`Failed to collect ${blockType}: ${err}.`)
 
         if (isMessagable(err) && err.message.startsWith('Tool recovery failed')) {
@@ -619,7 +627,7 @@ export async function collectBlock(
       }).warn('GoalChanged detected during collectBlock')
 
       mineflayer.bot.pathfinder.stop()
-      await sleep(200)
+      await abortableSleep(200, mineflayer.currentActionSignal)
 
       if (consecutiveGoalChanged >= MAX_CONSECUTIVE_GOAL_CHANGED) {
         logger.withFields({
@@ -647,18 +655,23 @@ export async function collectBlock(
 
 // Helper function to mine a block and collect drops
 async function mineAndCollect(mineflayer: Mineflayer, block: Block): Promise<void> {
+  throwIfAborted(mineflayer.currentActionSignal)
   // Break the block
   const brokeBlock = await breakBlockAt(mineflayer, block.position.x, block.position.y, block.position.z)
+  throwIfAborted(mineflayer.currentActionSignal)
   if (!brokeBlock) {
     throw new Error(`Failed to break ${block.name} at ${block.position.x}, ${block.position.y}, ${block.position.z}.`)
   }
   try {
     await goToPosition(mineflayer, block.position.x, block.position.y, block.position.z, 1)
   }
-  catch {
+  catch (error) {
+    if (error instanceof ActionAbortedError) {
+      throw error
+    }
     // best-effort drop pickup reposition only
   }
-  await sleep(250)
+  await abortableSleep(250, mineflayer.currentActionSignal)
   // Use your existing function to pick up nearby items
   await pickupNearbyItems(mineflayer, 5)
 }

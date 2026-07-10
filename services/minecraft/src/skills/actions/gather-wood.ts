@@ -3,6 +3,7 @@ import type { Mineflayer } from '../../libs/mineflayer'
 import { sleep } from '@moeru/std'
 import { Vec3 } from 'vec3'
 
+import { abortableSleep, ActionAbortedError, raceWithAbort, throwIfAborted } from '../../libs/mineflayer/action-abort'
 import { useLogger } from '../../utils/logger'
 import { getBlockAtAccurate, getNearestBlocksAccurate } from '../block-access'
 import { breakBlockAt } from '../blocks'
@@ -1947,20 +1948,23 @@ async function tryBridgeWoodMiningRecovery(
   // Baritone's mine(0, blocks) mines indefinitely, so stop it as soon as the requested
   // inventory target is reached instead of waiting for the bridge timeout.
   try {
+    const signal = mineflayer.currentActionSignal
+    throwIfAborted(signal)
     const miningPromise = pathfinder.mine([blockName])
       .then(result => ({ result, error: null as Error | null }))
       .catch((error: Error) => ({ result: false, error }))
     const deadline = Date.now() + BRIDGE_WOOD_MINING_RECOVERY_TIMEOUT_MS
 
     while (Date.now() < deadline) {
-      const miningResult = await Promise.race([
+      throwIfAborted(signal)
+      const miningResult = await raceWithAbort(Promise.race([
         miningPromise,
-        sleep(BRIDGE_WOOD_PROGRESS_POLL_MS).then(() => null),
-      ])
+        abortableSleep(BRIDGE_WOOD_PROGRESS_POLL_MS, signal).then(() => null),
+      ]), signal)
 
       if (getLogsCount(mineflayer, requestedWoodType) >= targetCount) {
         pathfinder.stop?.()
-        await sleep(BRIDGE_WOOD_MINING_INVENTORY_SETTLE_MS)
+        await abortableSleep(BRIDGE_WOOD_MINING_INVENTORY_SETTLE_MS, signal)
         return true
       }
 
@@ -1995,6 +1999,9 @@ async function tryBridgeWoodMiningRecovery(
     return false
   }
   catch (error) {
+    if (error instanceof ActionAbortedError) {
+      throw error
+    }
     logger.withFields({ blockName, error: error instanceof Error ? error.message : String(error) })
       .warn('Bridge wood-mining recovery threw (likely timeout); baritone may have mined some blocks.')
     return false
@@ -2037,6 +2044,7 @@ export async function gatherWood(
     }
 
     while (logsCount < num && attempts < MAX_GATHER_WOOD_ATTEMPTS && noProgressAttempts < MAX_GATHER_WOOD_NO_PROGRESS_ATTEMPTS) {
+      throwIfAborted(mineflayer.currentActionSignal)
       attempts++
       if (shouldReturnControlForWoodGatheringSurvival(mineflayer, 'attempt-start', requestedWoodType)) {
         return false
@@ -2077,6 +2085,7 @@ export async function gatherWood(
       // manual pass is now the primary path so wood gathering stays grounded to a specific tree
       // column. Baritone remains the fallback when direct breaking still fails.
       for (const woodBlock of recoveryProbeCandidates) {
+        throwIfAborted(mineflayer.currentActionSignal)
         if (shouldReturnControlForWoodGatheringSurvival(mineflayer, 'candidate-start', requestedWoodType)) {
           stoppedForSurvival = true
           break
@@ -2261,13 +2270,14 @@ export async function gatherWood(
         attemptedReachableCandidate = true
         try {
           for (const aLog of aTree) {
+            throwIfAborted(mineflayer.currentActionSignal)
             if (shouldReturnControlForWoodGatheringSurvival(mineflayer, 'during-direct-break', requestedWoodType)) {
               stoppedForSurvival = true
               break
             }
 
             await breakBlockAt(mineflayer, aLog.x, aLog.y, aLog.z)
-            await sleep(MANUAL_WOOD_BREAK_SETTLE_MS)
+            await abortableSleep(MANUAL_WOOD_BREAK_SETTLE_MS, mineflayer.currentActionSignal)
             if (getLogsCount(mineflayer, requestedWoodType) >= num) {
               break
             }
@@ -2277,7 +2287,7 @@ export async function gatherWood(
           }
 
           await pickupNearbyItems(mineflayer)
-          await sleep(MANUAL_WOOD_PICKUP_SETTLE_MS)
+          await abortableSleep(MANUAL_WOOD_PICKUP_SETTLE_MS, mineflayer.currentActionSignal)
           await refreshInventoryState(mineflayer)
           logsCount = getLogsCount(mineflayer, requestedWoodType)
           logger.log(`Collected wood. Total ${targetDescription} now: ${logsCount}.`)
@@ -2307,6 +2317,9 @@ export async function gatherWood(
           avoidedTargets.add(treeBaseKey)
         }
         catch (digError) {
+          if (digError instanceof ActionAbortedError) {
+            throw digError
+          }
           logger.withFields({
             blockName: woodBlock.name,
             x: woodBlock.position.x,
@@ -2328,7 +2341,7 @@ export async function gatherWood(
           }
 
           await pickupNearbyItems(mineflayer)
-          await sleep(MANUAL_WOOD_PICKUP_SETTLE_MS)
+          await abortableSleep(MANUAL_WOOD_PICKUP_SETTLE_MS, mineflayer.currentActionSignal)
           await refreshInventoryState(mineflayer)
           logsCount = getLogsCount(mineflayer, requestedWoodType)
           logger.log(`Bridge wood-mining recovery finished. Total ${targetDescription} now: ${logsCount}.`)
@@ -2362,7 +2375,7 @@ export async function gatherWood(
           // Always refresh inventory after baritone attempt — even on timeout/failure,
           // baritone may have mined some logs before the error occurred.
           if (baritoneMined) {
-            await sleep(BRIDGE_WOOD_MINING_INVENTORY_SETTLE_MS)
+            await abortableSleep(BRIDGE_WOOD_MINING_INVENTORY_SETTLE_MS, mineflayer.currentActionSignal)
           }
           await refreshInventoryState(mineflayer)
           logsCount = getLogsCount(mineflayer, requestedWoodType)
@@ -2428,6 +2441,9 @@ export async function gatherWood(
     return true
   }
   catch (error) {
+    if (error instanceof ActionAbortedError) {
+      throw error
+    }
     console.error('Failed to gather wood:', error)
     return false
   }
