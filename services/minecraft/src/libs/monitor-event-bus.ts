@@ -28,6 +28,8 @@ export type MonitorEventType
     | 'llm:requestSent'
     | 'llm:responseReceived'
     | 'tokenBudget:state'
+    | 'reflex:triggered'
+    | 'reflex:resolved'
 
 export interface MonitorEvent {
   type: MonitorEventType

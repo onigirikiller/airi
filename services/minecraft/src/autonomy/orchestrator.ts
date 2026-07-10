@@ -3,6 +3,7 @@ import type { Client } from '@proj-airi/server-sdk'
 import type { MineflayerWithAgents } from '../libs/llm-agent/types'
 import type { Plan } from '../libs/mineflayer/base-agent'
 import type { WorldFacts } from './preconditions'
+import type { ReflexController } from './reflex'
 import type { AutonomyDecisionContext, AutonomyIntent, AutonomySignal, YouTubeChatMessage } from './types'
 
 import process from 'node:process'
@@ -26,6 +27,7 @@ import {
   TOKEN_BUDGET_SHUTDOWN_EVENT,
   tokenBudgetGuard,
 } from '../libs/llm-usage/token-budget'
+import { ActionAbortedError } from '../libs/mineflayer/action-abort'
 import { emitFallbackMonitor, monitorBus } from '../libs/monitor-event-bus'
 import { useLogger } from '../utils/logger'
 import { GeminiAutonomyDecisionProvider } from './decision-provider'
@@ -437,6 +439,7 @@ export class AutonomousStreamOrchestrator {
   constructor(
     private readonly bot: MineflayerWithAgents,
     private readonly airiClient: Client,
+    private readonly reflex?: ReflexController,
   ) {
     tokenBudgetGuard.onBlocked(() => this.handleTokenBudgetBlocked())
   }
@@ -650,6 +653,12 @@ export class AutonomousStreamOrchestrator {
   private async tickImpl(): Promise<void> {
     this.ingestYouTubeMessages()
     const now = Date.now()
+
+    // Survival reflexes own the bot while engaged; planning and recovery wait.
+    if (this.reflex?.isEngaged()) {
+      return
+    }
+
     this.updateCoordinateStuckState(now)
 
     // 鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ Lv0 A-2: ProgressWatchdog (stall detection beyond coordinate) 鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ
@@ -2417,6 +2426,22 @@ export class AutonomousStreamOrchestrator {
     }
     catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
+      if (error instanceof ActionAbortedError) {
+        // Interruptions (reflexes, watchdogs, supersession) are not planning
+        // failures: do not trip the circuit breaker or queue recovery.
+        this.logger.withFields({ goal, reason: error.reason }).warn('Autonomy goal interrupted')
+        this.pushSignal({
+          id: randomUUID(),
+          source: 'system',
+          author: 'autonomy',
+          text: `goal-result:interrupted:${goal}`,
+          importance: 0.5,
+          timestamp: Date.now(),
+        })
+        monitorBus.emitMonitor('orchestrator:goalFailed', { goal, error: errorMessage, interrupted: true })
+        this.bot.memory?.completeGoal?.(goal, { success: false, reason: `interrupted: ${error.reason}` })
+        return
+      }
       const normalizedErrorMessage = normalizeRecoverableGoalErrorMessage(errorMessage)
       this.consecutiveGoalFailures++
       this.lastGoalFailureAt = Date.now()
