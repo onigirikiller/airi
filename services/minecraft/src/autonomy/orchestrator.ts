@@ -29,10 +29,13 @@ import {
 } from '../libs/llm-usage/token-budget'
 import { ActionAbortedError } from '../libs/mineflayer/action-abort'
 import { emitFallbackMonitor, monitorBus } from '../libs/monitor-event-bus'
+import { getNearestEntityWhere } from '../skills/world'
 import { useLogger } from '../utils/logger'
+import { isHostile } from '../utils/mcdata'
 import { GeminiAutonomyDecisionProvider } from './decision-provider'
 import { runInInferenceLane } from './inference-lane'
 import { retrieveRelevantKnowledge } from './knowledge-retriever'
+import { describeDeathLesson, LessonStore } from './lessons'
 import { incrementMetric } from './metrics'
 import { buildDeterministicNarration } from './narration'
 import { classifyGoalType, collectWorldFacts, describeGoalConstraint } from './preconditions'
@@ -429,6 +432,7 @@ export class AutonomousStreamOrchestrator {
 
   // 鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ Lv0鬯ｩ蛹・ｽｽ・ｯ郢晢ｽｻ繝ｻ・ｶ鬯ｯ・ｮ・つ髯橸ｽｳ郢晢ｽｻ stability mechanisms 鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ鬯ｮ・ｫ繝ｻ・ｨ髮九ｇ蠎・ｾつ
   private readonly progressWatchdog = new ProgressWatchdog()
+  private lessons: LessonStore | null = null
   private worldStateVersion = 0
   private precondFailCount = new Map<string, number>()
   private banUntilMs = new Map<string, number>()
@@ -485,7 +489,9 @@ export class AutonomousStreamOrchestrator {
       return
 
     this.started = true
+    this.lessons ??= new LessonStore(this.bot.username)
     this.bot.bot.on('chat', this.handleMinecraftChat)
+    this.bot.bot.on('death', this.handleBotDeath)
     this.airiClient.onEvent('spark:command', this.handleSparkCommand)
     this.youtubeBridge.start()
 
@@ -509,12 +515,41 @@ export class AutonomousStreamOrchestrator {
     this.youtubeBridge.stop()
     this.stopGoalCommentary()
     this.bot.bot.off('chat', this.handleMinecraftChat)
+    this.bot.bot.off?.('death', this.handleBotDeath)
     this.airiClient.offEvent('spark:command', this.handleSparkCommand)
     if (this.loopTimer) {
       clearInterval(this.loopTimer)
       this.loopTimer = null
     }
+    this.lessons?.flush()
     this.logger.log('Autonomy orchestrator stopped')
+  }
+
+  private handleBotDeath = (): void => {
+    try {
+      const facts = collectWorldFacts(this.bot)
+      const snapshot = this.buildProgressionSnapshotSafe()
+      const hostile = getNearestEntityWhere(this.bot as any, entity => isHostile(entity), 8)
+      const fact = describeDeathLesson(facts, hostile?.name ?? undefined)
+      this.lessons?.record({
+        trigger: 'death',
+        fact,
+        milestone: snapshot?.currentMilestone ?? 'unknown',
+        dimension: facts.dimension,
+      })
+      this.pushSignal({
+        id: randomUUID(),
+        source: 'system',
+        author: 'death-observer',
+        text: `death: ${fact}`,
+        importance: 0.9,
+        timestamp: Date.now(),
+      })
+      this.logger.withField('lesson', fact).warn('Recorded death lesson')
+    }
+    catch (error) {
+      this.logger.withError(error).warn('Failed to record death lesson')
+    }
   }
 
   private async decideIntent(context: AutonomyDecisionContext): Promise<AutonomyIntent> {
@@ -669,6 +704,17 @@ export class AutonomousStreamOrchestrator {
         const stallState = this.progressWatchdog.isStalled()
         if (stallState.stalled) {
           incrementMetric('stallDetectedCount')
+          try {
+            this.lessons?.record({
+              trigger: 'stall',
+              fact: `Progress stalled: ${stallState.reason}`,
+              milestone: this.buildProgressionSnapshotSafe()?.currentMilestone ?? 'unknown',
+              dimension: watchdogFacts.dimension,
+            })
+          }
+          catch {
+            /* lesson recording must never break stall handling */
+          }
           const stallSignal = `progress-stall: ${stallState.reason}`
           this.logger.withField('reason', stallState.reason).warn('[Stability] Progress stall detected; switching to deterministic recovery')
           this.pushSignal({
@@ -1103,6 +1149,15 @@ export class AutonomousStreamOrchestrator {
       structuredMemory = this.bot.memory?.getStructuredContext?.()
       const goalCandidates = config.autonomy.selfGoals.slice(0, 5)
       knowledgeSnippet = retrieveRelevantKnowledge(worldFacts, goalCandidates) || undefined
+
+      const lessonLines = this.lessons?.formatForPrompt({
+        dimension: worldFacts.dimension,
+        milestone: progression.currentMilestone,
+      }, 4) ?? []
+      if (lessonLines.length > 0) {
+        const lessonsBlock = `--- Lessons from past deaths/failures ---\n${lessonLines.join('\n')}`
+        knowledgeSnippet = knowledgeSnippet ? `${knowledgeSnippet}\n\n${lessonsBlock}` : lessonsBlock
+      }
     }
     catch (err) {
       this.logger.withError(err).warn('[Stability] RAG knowledge retrieval failed (non-fatal)')
@@ -2446,6 +2501,20 @@ export class AutonomousStreamOrchestrator {
       this.consecutiveGoalFailures++
       this.lastGoalFailureAt = Date.now()
       this.recordGoalFailure(goal, errorMessage)
+      if (this.consecutiveGoalFailures >= 2) {
+        try {
+          const facts = collectWorldFacts(this.bot)
+          this.lessons?.record({
+            trigger: 'goal-failure',
+            fact: `Goal "${goal}" keeps failing: ${errorMessage.slice(0, 140)}`,
+            milestone: this.buildProgressionSnapshotSafe()?.currentMilestone ?? 'unknown',
+            dimension: facts.dimension,
+          })
+        }
+        catch {
+          /* lesson recording must never break goal handling */
+        }
+      }
       this.activateRecoveryBackpressure()
       if (
         normalizedErrorMessage.includes('unknown command')
