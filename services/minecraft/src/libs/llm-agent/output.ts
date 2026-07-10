@@ -11,7 +11,7 @@ import { withSerializedGpuTask } from '../gpu-coordinator'
 import { emitFallbackMonitor } from '../monitor-event-bus'
 import { getPresentationScheduler } from './presentation-scheduler'
 
-interface OutputVoicePayload {
+export interface OutputVoicePayload {
   provider: 'gemini-live' | 'gemini-http' | 'local-tts'
   model: string
   mimeType: string
@@ -766,7 +766,7 @@ async function generateIrodoriTtsVoice(
   }, priority)
 }
 
-async function generateLocalVoice(
+export async function generateLocalVoice(
   text: string,
   logger?: Logger,
   priority: 'high' | 'normal' | 'low' = 'normal',
@@ -1456,6 +1456,54 @@ export function publishAssistantMessageToAiri(
     {
       maxLatenessMs: priority === 'high' ? undefined : options?.maxLatenessMs,
       label: `assistant-output:${priority}`,
+    },
+  )
+}
+
+/**
+ * Publishes a pre-synthesized voice clip on the presentation clock, skipping
+ * LLM and TTS entirely. Used by the instant-reaction voice bank so a scream
+ * lands the moment the danger appears on the delayed stream video.
+ */
+export function publishPrerenderedVoiceToAiri(
+  airiClient: Client | undefined,
+  text: string,
+  voice: OutputVoicePayload,
+  logger?: Logger,
+  options?: { eventAt?: number, maxLatenessMs?: number },
+): void {
+  const content = text.trim()
+  if (!content) {
+    return
+  }
+
+  getPresentationScheduler().schedule(
+    options?.eventAt ?? Date.now(),
+    () => {
+      const holdMs = estimateVoicePlaybackMs(content) + VOICE_PLAYBACK_MIN_GAP_MS
+      voicePlaybackBusyUntil = Math.max(voicePlaybackBusyUntil, Date.now() + holdMs)
+      void writeObsSubtitle(content, logger)
+      if (airiClient) {
+        try {
+          airiClient.send({
+            type: 'output:gen-ai:chat:message',
+            data: {
+              message: {
+                role: 'assistant',
+                content,
+              },
+              voice,
+            } as any,
+          })
+        }
+        catch (error) {
+          logger?.withError(error).warn('Failed to forward prerendered voice to AIRI server')
+        }
+      }
+    },
+    {
+      maxLatenessMs: options?.maxLatenessMs ?? 6_000,
+      label: 'voice-bank',
     },
   )
 }
