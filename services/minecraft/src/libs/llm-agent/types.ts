@@ -24,6 +24,7 @@ export interface MineflayerWithAgents extends Mineflayer {
 }
 
 export interface LLMAgentOptions {
-  agent: Neuri
+  agent?: Neuri
+  createAgent?: (mineflayer: Mineflayer) => Promise<Neuri>
   airiClient: Client
 }

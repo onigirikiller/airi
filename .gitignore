@@ -105,6 +105,7 @@ web-ext.config.ts
 # Data
 .postgres
 twitter-session.json
+services/minecraft/runtime/
 
 # Symlinks created by nix build
 result*

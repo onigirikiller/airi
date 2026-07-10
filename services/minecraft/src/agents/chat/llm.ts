@@ -7,6 +7,7 @@ import { agent } from 'neuri'
 import { system, user } from 'neuri/openai'
 
 import { config as appConfig } from '../../composables/config'
+import { isLikelyOllamaBaseUrl, unloadOllamaModel, withSerializedGpuTask } from '../../libs/gpu-coordinator'
 import { useLogger } from '../../utils/logger'
 import { generateChatAgentPrompt } from './adapter'
 
@@ -42,9 +43,20 @@ export async function generateChatResponse(
     logger.log('Generating response...')
 
     const handleCompletion = async (c: any): Promise<string> => {
-      const completion = await c.reroute('chat', c.messages, {
-        model: config.model ?? appConfig.openai.model,
+      const model = config.model ?? appConfig.speechLlm.model
+      const reroute = async () => await c.reroute('chat', c.messages, {
+        model,
       })
+      const completion = isLikelyOllamaBaseUrl(appConfig.speechLlm.baseUrl)
+        ? await withSerializedGpuTask('ollama:chat-agent', logger, async () => {
+            try {
+              return await reroute()
+            }
+            finally {
+              await unloadOllamaModel(appConfig.speechLlm.baseUrl, model, logger)
+            }
+          })
+        : await reroute()
 
       if (!completion || 'error' in completion) {
         logger.withFields(c).error('Completion failed')

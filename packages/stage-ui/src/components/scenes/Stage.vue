@@ -21,8 +21,9 @@ import { useBroadcastChannel } from '@vueuse/core'
 // import embedWorkerURL from '@xsai-transformers/embed/worker?worker&url'
 // import { embed } from '@xsai/embed'
 import { generateSpeech } from '@xsai/generate-speech'
+import { nanoid } from 'nanoid'
 import { storeToRefs } from 'pinia'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { useDelayMessageQueue, useEmotionsMessageQueue } from '../../composables/queues'
 import { llmInferenceEndToken } from '../../constants'
@@ -95,6 +96,22 @@ type PresentEvent
     | { type: 'assistant-append', text: string }
 const { post: postPresent } = useBroadcastChannel<PresentEvent, PresentEvent>({ name: 'airi-chat-present' })
 
+interface RemoteVoicePayload {
+  provider?: string
+  model?: string
+  mimeType?: string
+  audio?: string
+}
+
+interface RemoteVoicePlaybackEvent {
+  type: 'play-remote-voice'
+  id: string
+  text?: string
+  voice: RemoteVoicePayload
+}
+
+const { data: incomingRemoteVoicePlayback } = useBroadcastChannel<RemoteVoicePlaybackEvent, RemoteVoicePlaybackEvent>({ name: 'airi-remote-voice-playback' })
+
 viewUpdateCleanups.push(live2dStore.onShouldUpdateView(async () => {
   showStage.value = false
   await settingsStore.updateStageModel()
@@ -116,7 +133,15 @@ const nowSpeaking = ref(false)
 const lipSyncStarted = ref(false)
 const lipSyncLoopId = ref<number>()
 const live2dLipSync = ref<Live2DLipSync>()
-const live2dLipSyncOptions: Live2DLipSyncOptions = { mouthUpdateIntervalMs: 50, mouthLerpWindowMs: 50 }
+const live2dLipSyncOptions: Live2DLipSyncOptions = {
+  // NOTICE: RPG uses Style-Bert-VITS2 by default, which tends to be quieter than
+  // Minecraft's common VoiceVox profile. Increase lip-sync sensitivity on the main path.
+  cap: 0.95,
+  volumeScale: 1.6,
+  volumeExponent: 0.55,
+  mouthUpdateIntervalMs: 50,
+  mouthLerpWindowMs: 50,
+}
 
 const { activeCard } = storeToRefs(useAiriCardStore())
 const speechStore = useSpeechStore()
@@ -162,6 +187,37 @@ function playSpecialToken(special: string) {
   emotionMessageContentQueue.enqueue(special)
 }
 const lipSyncNode = ref<AudioNode>()
+const lipSyncGainNode = ref<GainNode>()
+const lipSyncGainConnected = ref(false)
+const LIP_SYNC_BASE_GAIN = 2.2
+const LIP_SYNC_MAX_GAIN = 12
+const LIP_SYNC_TARGET_RMS = 0.09
+const LIP_SYNC_RMS_FLOOR = 0.008
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
+function computeLipSyncGain(audio: AudioBuffer): number {
+  const channelData = audio.numberOfChannels > 0 ? audio.getChannelData(0) : undefined
+  if (!channelData || channelData.length === 0) {
+    return LIP_SYNC_BASE_GAIN
+  }
+
+  // Sample with stride for predictable cost on longer clips.
+  const stride = Math.max(1, Math.floor(channelData.length / 6000))
+  let sumSquares = 0
+  let count = 0
+  for (let i = 0; i < channelData.length; i += stride) {
+    const sample = channelData[i] ?? 0
+    sumSquares += sample * sample
+    count++
+  }
+
+  const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0
+  const normalized = LIP_SYNC_TARGET_RMS / Math.max(LIP_SYNC_RMS_FLOOR, rms)
+  return clamp(LIP_SYNC_BASE_GAIN * normalized, 1, LIP_SYNC_MAX_GAIN)
+}
 
 async function playFunction(item: Parameters<Parameters<typeof createPlaybackManager<AudioBuffer>>[0]['play']>[0], signal: AbortSignal): Promise<void> {
   if (!audioContext || !item.audio)
@@ -172,8 +228,8 @@ async function playFunction(item: Parameters<Parameters<typeof createPlaybackMan
     try {
       await audioContext.resume()
     }
-    catch {
-      return
+    catch (error) {
+      console.warn('[Stage] AudioContext resume failed, continuing playback attempt', { error })
     }
   }
 
@@ -184,8 +240,14 @@ async function playFunction(item: Parameters<Parameters<typeof createPlaybackMan
   source.connect(audioContext.destination)
   if (audioAnalyser.value)
     source.connect(audioAnalyser.value)
-  if (lipSyncNode.value)
-    source.connect(lipSyncNode.value)
+  if (lipSyncNode.value) {
+    if (!lipSyncGainNode.value) {
+      lipSyncGainNode.value = audioContext.createGain()
+      lipSyncGainNode.value.gain.value = LIP_SYNC_BASE_GAIN
+    }
+    lipSyncGainNode.value.gain.value = computeLipSyncGain(item.audio)
+    source.connect(lipSyncGainNode.value)
+  }
 
   return new Promise<void>((resolve) => {
     let settled = false
@@ -227,6 +289,20 @@ async function playFunction(item: Parameters<Parameters<typeof createPlaybackMan
   })
 }
 
+function decodeBase64ToUint8Array(base64: string): Uint8Array {
+  const normalized = base64.trim()
+  const binary = window.atob(normalized)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
+
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+}
+
 const playbackManager = createPlaybackManager<AudioBuffer>({
   play: playFunction,
   maxVoices: 1,
@@ -234,6 +310,48 @@ const playbackManager = createPlaybackManager<AudioBuffer>({
   overflowPolicy: 'queue',
   ownerOverflowPolicy: 'steal-oldest',
 })
+
+async function scheduleRemoteVoicePlayback(event: RemoteVoicePlaybackEvent): Promise<void> {
+  const voice = event.voice
+  const mimeType = voice?.mimeType?.trim()
+  const audioBase64 = voice?.audio?.trim()
+  if (!mimeType || !audioBase64) {
+    return
+  }
+
+  setupAnalyser()
+  await setupLipSync()
+
+  if (audioContext.state === 'suspended') {
+    try {
+      await audioContext.resume()
+    }
+    catch (error) {
+      console.warn('[Stage] AudioContext resume failed during remote voice scheduling', { error })
+    }
+  }
+
+  const bytes = decodeBase64ToUint8Array(audioBase64)
+  const arrayBuffer = uint8ArrayToArrayBuffer(bytes)
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+  const baseId = event.id?.trim() || nanoid()
+  const text = event.text?.trim() || '[remote voice]'
+  const createdAt = Date.now()
+
+  playbackManager.schedule({
+    id: `remote-voice:${baseId}`,
+    streamId: `remote-voice:${baseId}`,
+    intentId: `remote-voice:${baseId}`,
+    segmentId: `remote-voice:${baseId}`,
+    ownerId: activeCardId.value,
+    priority: 8,
+    text,
+    special: null,
+    audio: audioBuffer,
+    createdAt,
+  })
+}
 
 const speechPipeline = createSpeechPipeline<AudioBuffer>({
   tts: async (request, signal) => {
@@ -363,11 +481,12 @@ function startLipSyncLoop() {
     return
 
   const tick = () => {
-    if (!nowSpeaking.value || !live2dLipSync.value) {
+    if (!nowSpeaking.value) {
       mouthOpenSize.value = 0
     }
     else {
-      mouthOpenSize.value = live2dLipSync.value.getMouthOpen()
+      const measuredMouthOpen = live2dLipSync.value?.getMouthOpen() ?? 0
+      mouthOpenSize.value = measuredMouthOpen
     }
     lipSyncLoopId.value = requestAnimationFrame(tick)
   }
@@ -383,6 +502,14 @@ async function setupLipSync() {
     const lipSync = await createLive2DLipSync(audioContext, wlipsyncProfile as Profile, live2dLipSyncOptions)
     live2dLipSync.value = lipSync
     lipSyncNode.value = lipSync.node
+    if (!lipSyncGainNode.value) {
+      lipSyncGainNode.value = audioContext.createGain()
+      lipSyncGainNode.value.gain.value = LIP_SYNC_BASE_GAIN
+    }
+    if (!lipSyncGainConnected.value) {
+      lipSyncGainNode.value.connect(lipSyncNode.value)
+      lipSyncGainConnected.value = true
+    }
     await audioContext.resume()
     startLipSyncLoop()
     lipSyncStarted.value = true
@@ -463,6 +590,20 @@ chatHookCleanups.push(onAssistantResponseEnd(async (_message) => {
 
   // await db.value?.execute(`INSERT INTO memory_test (vec) VALUES (${JSON.stringify(res.embedding)});`)
 }))
+
+const { stop: stopRemoteVoiceWatch } = watch(incomingRemoteVoicePlayback, async (event) => {
+  if (!event || event.type !== 'play-remote-voice') {
+    return
+  }
+
+  try {
+    await scheduleRemoteVoicePlayback(event)
+  }
+  catch (error) {
+    console.error('Failed to schedule remote voice playback', error)
+  }
+})
+viewUpdateCleanups.push(stopRemoteVoiceWatch)
 
 onUnmounted(() => {
   lipSyncStarted.value = false

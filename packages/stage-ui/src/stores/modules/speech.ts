@@ -36,6 +36,10 @@ export const useSpeechStore = defineStore('speech', () => {
 
   // Computed properties
   const supportsModelListing = computed(() => {
+    if (!activeSpeechProvider.value) {
+      return false
+    }
+
     return providersStore.getProviderMetadata(activeSpeechProvider.value)?.capabilities.listModels !== undefined
   })
 

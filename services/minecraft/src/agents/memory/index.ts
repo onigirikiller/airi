@@ -78,7 +78,7 @@ export class MemoryAgentImpl implements MemoryAgent {
       throw new Error('Memory agent not initialized')
     }
 
-    this.memoryInstance.chatHistory.push(message)
+    this.memoryInstance.pushChatMessage(message)
     this.logger.withFields({ message }).log('Adding chat message to memory')
   }
 
@@ -87,7 +87,7 @@ export class MemoryAgentImpl implements MemoryAgent {
       throw new Error('Memory agent not initialized')
     }
 
-    this.memoryInstance.actions.push(action)
+    this.memoryInstance.pushAction(action)
     this.logger.withFields({ action }).log('Adding action to memory')
   }
 

@@ -15,6 +15,7 @@ import { useAudioRecorder } from '@proj-airi/stage-ui/composables/audio/audio-re
 import { useVAD } from '@proj-airi/stage-ui/stores/ai/models/vad'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useLive2d } from '@proj-airi/stage-ui/stores/live2d'
+import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingSpeechInputPipeline } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
@@ -48,6 +49,7 @@ const { startRecord, stopRecord, onStopRecord } = useAudioRecorder(stream)
 const hearingPipeline = useHearingSpeechInputPipeline()
 const { transcribeForRecording } = hearingPipeline
 const { supportsStreamInput } = storeToRefs(hearingPipeline)
+const serverChannelStore = useModsServerChannelStore()
 const providersStore = useProvidersStore()
 const consciousnessStore = useConsciousnessStore()
 const { activeProvider: activeChatProvider, activeModel: activeChatModel } = storeToRefs(consciousnessStore)
@@ -70,6 +72,7 @@ let stopOnStopRecord: (() => void) | undefined
 
 async function startAudioInteraction() {
   try {
+    await serverChannelStore.ensureConnected()
     await initVAD()
     if (stream.value)
       await startVAD(stream.value)
@@ -81,6 +84,18 @@ async function startAudioInteraction() {
         return
 
       try {
+        if (serverChannelStore.connected) {
+          serverChannelStore.send({
+            type: 'input:text:voice',
+            data: {
+              'transcription': text,
+              'textRaw': text,
+              'stage-web': true,
+            },
+          })
+          return
+        }
+
         const provider = await providersStore.getProviderInstance(activeChatProvider.value)
         if (!provider || !activeChatModel.value)
           return

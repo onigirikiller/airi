@@ -46,6 +46,8 @@ function createEventId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
 }
 
+const MAX_PENDING_SENDS = 64
+
 export class Client<C = undefined> {
   private connected = false
   private connecting = false
@@ -55,6 +57,7 @@ export class Client<C = undefined> {
   private connectTask?: Promise<void>
   private heartbeatTimer?: ReturnType<typeof setInterval>
   private readonly identity: MetadataEventSource
+  private readonly pendingMessages: WebSocketEvent<C>[] = []
 
   private readonly opts: Required<Omit<ClientOptions<C>, 'token'>> & Pick<ClientOptions<C>, 'token'>
   private readonly eventListeners = new Map<
@@ -95,6 +98,7 @@ export class Client<C = undefined> {
     this.onEvent('module:authenticated', async (event) => {
       if (event.data.authenticated) {
         this.tryAnnounce()
+        this.flushPendingMessages()
       }
       else {
         await this.retryWithExponentialBackoff(() => this.tryAuthenticate())
@@ -206,11 +210,13 @@ export class Client<C = undefined> {
           this.connected = true
 
           this.startHeartbeat()
-
-          if (this.opts.token)
+          if (this.opts.token) {
             this.tryAuthenticate()
-          else
+          }
+          else {
             this.tryAnnounce()
+            this.flushPendingMessages()
+          }
 
           resolve()
         })
@@ -320,24 +326,61 @@ export class Client<C = undefined> {
     }
   }
 
-  send(data: WebSocketEventOptionalSource<C>): void {
-    if (this.websocket && this.connected) {
-      const payload = {
-        ...data,
-        metadata: {
-          ...data?.metadata,
-          source: data?.metadata?.source ?? this.identity,
-          event: {
-            id: data?.metadata?.event?.id ?? createEventId(),
-            ...data?.metadata?.event,
-          },
+  private normalizePayload(data: WebSocketEventOptionalSource<C>): WebSocketEvent<C> {
+    return {
+      ...data,
+      metadata: {
+        ...data?.metadata,
+        source: data?.metadata?.source ?? this.identity,
+        event: {
+          id: data?.metadata?.event?.id ?? createEventId(),
+          ...data?.metadata?.event,
         },
-      } as WebSocketEvent<C>
+      },
+    } as WebSocketEvent<C>
+  }
 
-      this.opts.onAnySend?.(payload)
-
-      this.websocket.send(superjson.stringify(payload))
+  private sendPayload(payload: WebSocketEvent<C>): void {
+    if (!this.websocket || !this.connected) {
+      return
     }
+
+    this.opts.onAnySend?.(payload)
+    this.websocket.send(superjson.stringify(payload))
+  }
+
+  private enqueuePendingMessage(payload: WebSocketEvent<C>): void {
+    this.pendingMessages.push(payload)
+    if (this.pendingMessages.length > MAX_PENDING_SENDS) {
+      this.pendingMessages.splice(0, this.pendingMessages.length - MAX_PENDING_SENDS)
+    }
+  }
+
+  private flushPendingMessages(): void {
+    if (!this.websocket || !this.connected || this.pendingMessages.length === 0) {
+      return
+    }
+
+    const pending = this.pendingMessages.splice(0, this.pendingMessages.length)
+    for (const payload of pending) {
+      this.sendPayload(payload)
+    }
+  }
+
+  send(data: WebSocketEventOptionalSource<C>): void {
+    const payload = this.normalizePayload(data)
+
+    if (this.websocket && this.connected) {
+      this.sendPayload(payload)
+      return
+    }
+
+    if (this.shouldClose) {
+      return
+    }
+
+    this.enqueuePendingMessage(payload)
+    void this.connect()
   }
 
   sendRaw(data: string | ArrayBufferLike | ArrayBufferView): void {

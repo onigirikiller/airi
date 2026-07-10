@@ -12,7 +12,7 @@ import { availableLogLevelStrings, Format, LogLevelString, logLevelStringToLogLe
 import { MessageHeartbeat, MessageHeartbeatKind, WebSocketEventSource } from '@proj-airi/server-shared/types'
 import { defineWebSocketHandler, H3 } from 'h3'
 import { nanoid } from 'nanoid'
-import { stringify } from 'superjson'
+import { parse, stringify } from 'superjson'
 
 import packageJSON from '../package.json'
 
@@ -70,6 +70,24 @@ const DEFAULT_HEARTBEAT_TTL_MS = 60_000
 // helper send function
 function send(peer: Peer, event: WebSocketEvent<Record<string, unknown>> | string) {
   peer.send(typeof event === 'string' ? event : stringify(event))
+}
+
+function decodeIncomingEvent(message: { text: () => string }): WebSocketEvent {
+  const rawText = message.text()
+
+  // Prefer superjson payloads from @proj-airi/server-sdk clients.
+  const superjsonEvent = parse<WebSocketEvent | undefined>(rawText)
+  if (superjsonEvent && typeof superjsonEvent.type === 'string') {
+    return superjsonEvent
+  }
+
+  // Fallback for plain JSON clients.
+  const plainEvent = JSON.parse(rawText) as WebSocketEvent
+  if (plainEvent && typeof plainEvent.type === 'string') {
+    return plainEvent
+  }
+
+  throw new Error('invalid event payload')
 }
 
 export function setupApp(options?: {
@@ -200,7 +218,7 @@ export function setupApp(options?: {
       let event: WebSocketEvent
 
       try {
-        event = message.json() as WebSocketEvent
+        event = decodeIncomingEvent(message as { text: () => string })
       }
       catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err)

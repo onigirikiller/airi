@@ -1,4 +1,8 @@
+import type { Logg } from '@guiiai/logg'
+
 import { Format, LogLevel, setGlobalFormat, setGlobalLogLevel, useLogg } from '@guiiai/logg'
+
+export type Logger = Logg
 
 export function initLogger() {
   setGlobalLogLevel(LogLevel.Debug)

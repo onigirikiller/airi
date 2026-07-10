@@ -151,3 +151,13 @@ Concise but detailed reference for contributors working across the `moeru-ai/air
 - Maintain structured `README.md` documentation for each `packages/` and `apps/` entry, covering what it does, how to use it, when to use it, and when not to use it.
 - Always run `pnpm typecheck` and `pnpm lint:fix` after finishing a task.
 - Use Conventional Commits for commit messages (e.g., `feat: add runner reconnect backoff`).
+
+## Minecraft Long-Run Autonomy Rules
+
+- Keep `services/minecraft` and `services/minecraft-fabric-mod` as the primary implementation surface for gameplay autonomy changes.
+- Treat `TargetSpec`, evaluator gaps, canonical state, capability handshake, progress watchdog, and recovery rails as production architecture, not benchmark-only helpers.
+- Do not reintroduce fixed dragon/diamond/house milestone scripts, fixed coordinates, or single-blueprint house behavior in the production planner path.
+- Keep gameplay-first scheduling: action and recovery must outrank narration and TTS under single-lane / low-VRAM operation.
+- Maintain `AUTONOMY_CHECKLIST.md`, `AUTONOMY_BENCHMARKS.md`, `AUTONOMY_WORKLOG.md`, and `code_review.md` whenever long-run Minecraft autonomy work is touched.
+- Materialize observed failures into regression tests or replay fixtures before broadening the implementation.
+- Capture Minecraft screenshots at major checkpoints and record the observation in `AUTONOMY_WORKLOG.md` when visual confirmation changes the next hypothesis.

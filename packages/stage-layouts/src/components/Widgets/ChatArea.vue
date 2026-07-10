@@ -6,6 +6,7 @@ import { useAudioAnalyzer } from '@proj-airi/stage-ui/composables'
 import { useAudioContext } from '@proj-airi/stage-ui/stores/audio'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
+import { useModsServerChannelStore } from '@proj-airi/stage-ui/stores/mods/api/channel-server'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useHearingSpeechInputPipeline, useHearingStore } from '@proj-airi/stage-ui/stores/modules/hearing'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
@@ -27,6 +28,7 @@ const isListening = ref(false) // Transcription listening state (separate from m
 const providersStore = useProvidersStore()
 const { activeProvider, activeModel } = storeToRefs(useConsciousnessStore())
 const { themeColorsHueDynamic } = storeToRefs(useSettings())
+const serverChannelStore = useModsServerChannelStore()
 
 const { askPermission, startStream } = useSettingsAudioDevice()
 const { enabled, selectedAudioInput, stream, audioInputs } = storeToRefs(useSettingsAudioDevice())
@@ -36,6 +38,49 @@ const { ingest, onAfterMessageComposed, discoverToolsCompatibility } = chatOrche
 const { messages } = storeToRefs(chatSession)
 const { audioContext } = useAudioContext()
 const { t } = useI18n()
+
+function appendLocalUserMessage(text: string) {
+  const targetSessionId = chatSession.activeSessionId
+  if (!targetSessionId)
+    return
+
+  const sessionMessages = chatSession.getSessionMessages(targetSessionId)
+  sessionMessages.push({
+    role: 'user',
+    content: text,
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    createdAt: Date.now(),
+  })
+  chatSession.persistSessionMessages(targetSessionId)
+}
+
+async function sendTextToAiriServer(text: string): Promise<boolean> {
+  const messageText = text.trim()
+  if (!messageText)
+    return false
+
+  try {
+    // Avoid awaiting connection here; initialize failures can leave pending promises.
+    // `send` will queue and flush after reconnect.
+    void serverChannelStore.ensureConnected()
+
+    appendLocalUserMessage(messageText)
+    serverChannelStore.send({
+      type: 'input:text',
+      data: {
+        'text': messageText,
+        'textRaw': messageText,
+        'stage-web': true,
+      },
+    })
+    console.info('[ChatArea] Routed text to AIRI server', { connected: serverChannelStore.connected, text: messageText })
+    return true
+  }
+  catch (err) {
+    console.warn('[ChatArea] Failed to route text to AIRI server, falling back to local model:', err)
+    return false
+  }
+}
 
 // Transcription pipeline
 const hearingStore = useHearingStore()
@@ -83,6 +128,13 @@ async function debouncedAutoSend(text: string) {
     const textToSend = pendingAutoSendText.value.trim()
     if (textToSend && autoSendEnabled.value) {
       try {
+        const sentToBot = await sendTextToAiriServer(textToSend)
+        if (sentToBot) {
+          messageInput.value = ''
+          pendingAutoSendText.value = ''
+          return
+        }
+
         const providerConfig = providersStore.getProviderConfig(activeProvider.value)
         await ingest(textToSend, {
           chatProvider: await providersStore.getProviderInstance(activeProvider.value) as ChatProvider,
@@ -110,6 +162,11 @@ async function handleSend() {
   messageInput.value = ''
 
   try {
+    const sentToBot = await sendTextToAiriServer(textToSend)
+    if (sentToBot) {
+      return
+    }
+
     const providerConfig = providersStore.getProviderConfig(activeProvider.value)
 
     await ingest(textToSend, {
@@ -340,6 +397,12 @@ async function stopListening() {
       const textToSend = pendingAutoSendText.value.trim()
       pendingAutoSendText.value = ''
       try {
+        const sentToBot = await sendTextToAiriServer(textToSend)
+        if (sentToBot) {
+          messageInput.value = ''
+          return
+        }
+
         const providerConfig = providersStore.getProviderConfig(activeProvider.value)
         await ingest(textToSend, {
           chatProvider: await providersStore.getProviderInstance(activeProvider.value) as ChatProvider,

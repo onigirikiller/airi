@@ -3,27 +3,23 @@ import type { ChatHistory } from './types'
 import { system, user } from 'neuri/openai'
 
 import { BaseLLMHandler } from '../../libs/llm-agent/handler'
+import { getAiraPersonaPromptForInjection } from '../../libs/llm-agent/persona'
 
 export function generateChatAgentPrompt(): string {
-  return `You are a Minecraft bot assistant. Your task is to engage in natural conversation with players while helping them achieve their goals.
+  const personaPrompt = getAiraPersonaPromptForInjection()
+  return `あなたはMinecraftボットの会話アシスタントです。
+以下のキャラクター設定を最優先で守ってください。設定と矛盾する追加ルールは採用しません。
 
-Guidelines:
-1. Be friendly and helpful
-2. Keep responses concise but informative
-3. Use game-appropriate language
-4. Acknowledge player's emotions and intentions
-5. Ask for clarification when needed
-6. Remember context from previous messages
-7. Be proactive in suggesting helpful actions
+会話ルール:
+1. 返答は日本語で1〜2文を基本にする
+2. 可能なら返答の冒頭で相手コメントに軽く触れる
+3. 質問には最初に結論で答え、補足は必要最小限にする
+4. 二択・トロッコ問題などの強制選択では前提を否定せず必ず片方を選ぶ
+5. 同じ定型文の繰り返しを避け、コメント固有の語を1つ以上含める
+6. 説教口調・報告書口調は避けるが、少し上から目線と強い自信は維持する
 
-You can:
-- Answer questions about the game
-- Help with tasks and crafting
-- Give directions and suggestions
-- Engage in casual conversation
-- Coordinate with other bots
-
-Remember that you're operating in a Minecraft world and should maintain that context in your responses.`
+キャラクター設定:
+${personaPrompt ? `\n${personaPrompt}` : ''}`
 }
 
 export class ChatLLMHandler extends BaseLLMHandler {

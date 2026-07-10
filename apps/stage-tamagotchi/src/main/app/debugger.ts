@@ -4,8 +4,10 @@ import { env } from 'node:process'
 
 import { app, shell } from 'electron'
 
+import { shouldEnableRemoteDebugging } from './debug-flags'
+
 export function setupDebugger() {
-  if (/^true$/i.test(env.APP_REMOTE_DEBUG || '')) {
+  if (shouldEnableRemoteDebugging()) {
     const remoteDebugPort = Number(env.APP_REMOTE_DEBUG_PORT || '9222')
     if (Number.isNaN(remoteDebugPort) || !Number.isInteger(remoteDebugPort) || remoteDebugPort < 0 || remoteDebugPort > 65535) {
       throw new Error(`Invalid remote debug port: ${env.APP_REMOTE_DEBUG_PORT}`)
@@ -17,7 +19,7 @@ export function setupDebugger() {
 }
 
 export function openDebugger() {
-  if (/^true$/i.test(env.APP_REMOTE_DEBUG || '')) {
+  if (shouldEnableRemoteDebugging()) {
     const remoteDebugEndpoint = `http://localhost:${env.APP_REMOTE_DEBUG_PORT || '9222'}`
 
     http.get(`${remoteDebugEndpoint}/json`, (res) => {

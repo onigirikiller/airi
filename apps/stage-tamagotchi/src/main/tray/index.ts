@@ -4,9 +4,6 @@ import type { setupBeatSync } from '../windows/beat-sync'
 import type { setupCaptionWindowManager } from '../windows/caption'
 import type { WidgetsWindowManager } from '../windows/widgets'
 
-import { env } from 'node:process'
-
-import { is } from '@electron-toolkit/utils'
 import { app, Menu, nativeImage, Tray } from 'electron'
 import { once } from 'es-toolkit'
 import { isMacOS } from 'std-env'
@@ -14,6 +11,7 @@ import { isMacOS } from 'std-env'
 import icon from '../../../resources/icon.png?asset'
 import macOSTrayIcon from '../../../resources/tray-icon-macos.png?asset'
 
+import { shouldAutoOpenDevTools } from '../app/debug-flags'
 import { onAppBeforeQuit } from '../libs/bootkit/lifecycle'
 import { setupInlayWindow } from '../windows/inlay'
 import { toggleWindowShow } from '../windows/shared/window'
@@ -51,7 +49,7 @@ export function setupTray(params: {
         ]),
       },
       { type: 'separator' },
-      ...is.dev || env.MAIN_APP_DEBUG || env.APP_DEBUG
+      ...shouldAutoOpenDevTools()
         ? [
             { type: 'header', label: 'DevTools' },
             { label: 'Troubleshoot BeatSync...', click: () => params.beatSyncBgWindow.webContents.openDevTools() },

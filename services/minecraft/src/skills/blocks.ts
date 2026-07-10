@@ -5,14 +5,33 @@ import type { BlockFace } from './base'
 
 import pathfinderModel from 'mineflayer-pathfinder'
 
+import { sleep } from '@moeru/std'
 import { Vec3 } from 'vec3'
 
 import { getBlockId, makeItem } from '../utils/mcdata'
+import { getItemCount, refreshInventoryState } from './actions/inventory'
 import { log } from './base'
+import { getBlockAtAccurate, getNearestBlockAccurate } from './block-access'
 import { goToPosition } from './movement'
-import { getNearestBlock, getNearestBlocks, getPosition, shouldPlaceTorch } from './world'
+import { getNearestBlocks, getPosition, shouldPlaceTorch } from './world'
 
 const { goals, Movements } = pathfinderModel
+const BLOCK_BREAK_MOVE_TIMEOUT_MS = 20_000
+const BLOCK_DIG_TIMEOUT_MS = 15_000
+
+function createPathMovementsOrNull(mineflayer: Mineflayer): InstanceType<typeof Movements> | null {
+  const registry = (mineflayer.bot as any).registry
+  if (!registry?.blocksByName) {
+    return null
+  }
+
+  try {
+    return new Movements(mineflayer.bot)
+  }
+  catch {
+    return null
+  }
+}
 
 /**
  * Place a torch if needed
@@ -41,8 +60,8 @@ export async function breakBlockAt(
 ): Promise<boolean> {
   validatePosition(x, y, z)
 
-  const block = mineflayer.bot.blockAt(new Vec3(x, y, z))
-  if (isUnbreakableBlock(block))
+  const block = await getBlockAtAccurate(mineflayer, new Vec3(x, y, z))
+  if (!block || isUnbreakableBlock(block))
     return false
 
   if (mineflayer.allowCheats) {
@@ -65,6 +84,8 @@ function validatePosition(x: number, y: number, z: number) {
 }
 
 function isUnbreakableBlock(block: any): boolean {
+  if (!block)
+    return true
   return block.name === 'air' || block.name === 'water' || block.name === 'lava'
 }
 
@@ -75,18 +96,28 @@ async function breakWithCheats(mineflayer: Mineflayer, x: number, y: number, z: 
 }
 
 async function moveIntoRange(mineflayer: Mineflayer, block: any) {
-  if (mineflayer.bot.entity.position.distanceTo(block.position) > 4.5) {
+  // Use a tighter threshold (3.5) because FabricBridge position tracking can
+  // lag behind the real player position, causing the bot to think it's close
+  // enough when the actual Minecraft player is slightly out of reach.
+  if (mineflayer.bot.entity.position.distanceTo(block.position) > 3.5) {
     const pos = block.position
-    const movements = new Movements(mineflayer.bot)
-    movements.allowParkour = false
-    movements.allowSprinting = false
-    mineflayer.bot.pathfinder.setMovements(movements)
-    await mineflayer.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 4))
+    const movements = createPathMovementsOrNull(mineflayer)
+    if (movements) {
+      movements.allowParkour = false
+      movements.allowSprinting = false
+      mineflayer.bot.pathfinder.setMovements(movements)
+    }
+    await withTimeout(
+      mineflayer.bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, 3)),
+      BLOCK_BREAK_MOVE_TIMEOUT_MS,
+      `Pathing to ${block.name} at ${pos.x}, ${pos.y}, ${pos.z}`,
+      () => mineflayer.bot.pathfinder.stop?.(),
+    )
   }
 }
 
 async function breakInCreative(mineflayer: Mineflayer, block: any, x: number, y: number, z: number): Promise<boolean> {
-  await mineflayer.bot.dig(block, true)
+  await digBlockWithTimeout(mineflayer, block, x, y, z)
   log(mineflayer, `Broke ${block.name} at x:${x.toFixed(1)}, y:${y.toFixed(1)}, z:${z.toFixed(1)}.`)
   return true
 }
@@ -94,15 +125,62 @@ async function breakInCreative(mineflayer: Mineflayer, block: any, x: number, y:
 async function breakInSurvival(mineflayer: Mineflayer, block: any, x: number, y: number, z: number): Promise<boolean> {
   await mineflayer.bot.tool.equipForBlock(block)
 
-  const itemId = mineflayer.bot.heldItem?.type
-  if (!block.canHarvest(itemId)) {
-    log(mineflayer, `Don't have right tools to break ${block.name}.`)
-    return false
+  let itemId = mineflayer.bot.heldItem?.type
+  // canHarvest may not exist on FabricBridge blocks - skip check if not available
+  if (typeof block.canHarvest === 'function' && !block.canHarvest(itemId)) {
+    // NOTICE: FabricBridge can lag for one inventory tick after equipForBlock, so refresh
+    // once before declaring the tool missing.
+    await refreshInventoryState(mineflayer)
+    await mineflayer.bot.tool.equipForBlock(block)
+    itemId = mineflayer.bot.heldItem?.type
+    if (!block.canHarvest(itemId)) {
+      log(mineflayer, `Don't have right tools to break ${block.name}.`)
+      return false
+    }
   }
 
-  await mineflayer.bot.dig(block, true)
+  await digBlockWithTimeout(mineflayer, block, x, y, z)
   log(mineflayer, `Broke ${block.name} at x:${x.toFixed(1)}, y:${y.toFixed(1)}, z:${z.toFixed(1)}.`)
   return true
+}
+
+async function digBlockWithTimeout(
+  mineflayer: Mineflayer,
+  block: any,
+  x: number,
+  y: number,
+  z: number,
+): Promise<void> {
+  await withTimeout(
+    mineflayer.bot.dig(block, true),
+    BLOCK_DIG_TIMEOUT_MS,
+    `Digging ${block.name} at ${x}, ${y}, ${z}`,
+    () => mineflayer.bot.stopDigging?.(),
+  )
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  onTimeout?: () => void,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      onTimeout?.()
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([operation, timeout])
+  }
+  finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+    }
+  }
 }
 
 /**
@@ -217,9 +295,21 @@ async function placeWithoutCheats(
   const itemName = blockType === 'redstone_wire' ? 'redstone' : blockType
 
   let block = mineflayer.bot.inventory.items().find(item => item.name === itemName)
+  const hasOptimisticItem = getItemCount(mineflayer, itemName) > 0
   if (!block && mineflayer.isCreative) {
     await mineflayer.bot.creative.setInventorySlot(36, makeItem(itemName, 1))
     block = mineflayer.bot.inventory.items().find(item => item.name === itemName)
+  }
+
+  if (!block && hasOptimisticItem) {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await sleep(200)
+      await refreshInventoryState(mineflayer)
+      block = mineflayer.bot.inventory.items().find(item => item.name === itemName)
+      if (block) {
+        break
+      }
+    }
   }
 
   if (!block) {
@@ -227,31 +317,34 @@ async function placeWithoutCheats(
     return false
   }
 
-  const targetBlock = mineflayer.bot.blockAt(targetDest)
-  if (targetBlock?.name === blockType) {
-    log(mineflayer, `${blockType} already at ${targetBlock.position}.`)
+  const targetBlock = await getBlockAtAccurate(mineflayer, targetDest)
+  const targetBlockName = targetBlock?.name ?? 'air'
+  const targetBlockPosition = targetBlock?.position ?? targetDest
+
+  if (targetBlockName === blockType) {
+    log(mineflayer, `${blockType} already at ${targetBlockPosition}.`)
     return false
   }
 
   const emptyBlocks = ['air', 'water', 'lava', 'grass', 'short_grass', 'tall_grass', 'snow', 'dead_bush', 'fern']
-  if (!emptyBlocks.includes(targetBlock?.name ?? '')) {
+  if (!emptyBlocks.includes(targetBlockName)) {
     if (!await clearBlockSpace(mineflayer, targetBlock, blockType)) {
       return false
     }
   }
 
-  const { buildOffBlock, faceVec } = findPlacementSpot(mineflayer, targetDest, placeOn, emptyBlocks)
+  const { buildOffBlock, faceVec } = await findPlacementSpot(mineflayer, targetDest, placeOn, emptyBlocks)
   if (!buildOffBlock) {
-    log(mineflayer, `Cannot place ${blockType} at ${targetBlock?.position}: nothing to place on.`)
+    log(mineflayer, `Cannot place ${blockType} at ${targetBlockPosition}: nothing to place on.`)
     return false
   }
 
   if (!faceVec) {
-    log(mineflayer, `Cannot place ${blockType} at ${targetBlock?.position}: no valid face to place on.`)
+    log(mineflayer, `Cannot place ${blockType} at ${targetBlockPosition}: no valid face to place on.`)
     return false
   }
 
-  await moveIntoPosition(mineflayer, blockType, targetBlock)
+  await moveIntoPosition(mineflayer, blockType, targetBlockPosition)
   return await tryPlaceBlock(mineflayer, block, buildOffBlock, faceVec, blockType, targetDest)
 }
 
@@ -260,6 +353,10 @@ async function clearBlockSpace(
   targetBlock: any,
   blockType: string,
 ): Promise<boolean> {
+  if (!targetBlock) {
+    return true
+  }
+
   const removed = await breakBlockAt(mineflayer, targetBlock.position.x, targetBlock.position.y, targetBlock.position.z,
   )
   if (!removed) {
@@ -270,7 +367,7 @@ async function clearBlockSpace(
   return true
 }
 
-function findPlacementSpot(mineflayer: Mineflayer, targetDest: Vec3, placeOn: BlockFace, emptyBlocks: string[]) {
+async function findPlacementSpot(mineflayer: Mineflayer, targetDest: Vec3, placeOn: BlockFace, emptyBlocks: string[]) {
   const dirMap = {
     top: new Vec3(0, 1, 0),
     bottom: new Vec3(0, -1, 0),
@@ -283,7 +380,7 @@ function findPlacementSpot(mineflayer: Mineflayer, targetDest: Vec3, placeOn: Bl
   const dirs = getPlacementDirections(placeOn, dirMap)
 
   for (const d of dirs) {
-    const block = mineflayer.bot.blockAt(targetDest.plus(d))
+    const block = await getBlockAtAccurate(mineflayer, targetDest.plus(d))
     if (!emptyBlocks.includes(block?.name ?? '')) {
       return {
         buildOffBlock: block,
@@ -311,7 +408,7 @@ function getPlacementDirections(placeOn: BlockFace, dirMap: Record<string, Vec3>
   return directions
 }
 
-async function moveIntoPosition(mineflayer: Mineflayer, blockType: string, targetBlock: any) {
+async function moveIntoPosition(mineflayer: Mineflayer, blockType: string, targetBlockPosition: Vec3) {
   const dontMoveFor = [
     'torch',
     'redstone_torch',
@@ -331,32 +428,37 @@ async function moveIntoPosition(mineflayer: Mineflayer, blockType: string, targe
   const posAbove = pos.plus(new Vec3(0, 1, 0))
 
   if (!dontMoveFor.includes(blockType)
-    && (pos.distanceTo(targetBlock.position) < 1
-      || posAbove.distanceTo(targetBlock.position) < 1)) {
-    await moveAwayFromBlock(mineflayer, targetBlock)
+    && (pos.distanceTo(targetBlockPosition) < 1
+      || posAbove.distanceTo(targetBlockPosition) < 1)) {
+    await moveAwayFromBlock(mineflayer, targetBlockPosition)
   }
 
-  if (mineflayer.bot.entity.position.distanceTo(targetBlock.position) > 4.5) {
-    await moveToBlock(mineflayer, targetBlock)
+  if (mineflayer.bot.entity.position.distanceTo(targetBlockPosition) > 4.5) {
+    await moveToBlock(mineflayer, targetBlockPosition)
   }
 }
 
-async function moveAwayFromBlock(mineflayer: Mineflayer, targetBlock: any) {
+async function moveAwayFromBlock(mineflayer: Mineflayer, targetBlockPosition: Vec3) {
   const goal = new goals.GoalNear(
-    targetBlock.position.x,
-    targetBlock.position.y,
-    targetBlock.position.z,
+    targetBlockPosition.x,
+    targetBlockPosition.y,
+    targetBlockPosition.z,
     2,
   )
   const invertedGoal = new goals.GoalInvert(goal)
-  mineflayer.bot.pathfinder.setMovements(new Movements(mineflayer.bot))
+  const movements = createPathMovementsOrNull(mineflayer)
+  if (movements) {
+    mineflayer.bot.pathfinder.setMovements(movements)
+  }
   await mineflayer.bot.pathfinder.goto(invertedGoal)
 }
 
-async function moveToBlock(mineflayer: Mineflayer, targetBlock: any) {
-  const pos = targetBlock.position
-  const movements = new Movements(mineflayer.bot)
-  mineflayer.bot.pathfinder.setMovements(movements)
+async function moveToBlock(mineflayer: Mineflayer, targetBlockPosition: Vec3) {
+  const pos = targetBlockPosition
+  const movements = createPathMovementsOrNull(mineflayer)
+  if (movements) {
+    mineflayer.bot.pathfinder.setMovements(movements)
+  }
   await mineflayer.bot.pathfinder.goto(
     new goals.GoalNear(pos.x, pos.y, pos.z, 4),
   )
@@ -389,7 +491,7 @@ async function tryPlaceBlock(
  * Use a door at the specified position
  */
 export async function useDoor(mineflayer: Mineflayer, doorPos: Vec3 | null = null): Promise<boolean> {
-  doorPos = doorPos || await findNearestDoor(mineflayer.bot)
+  doorPos = doorPos || await findNearestDoor(mineflayer)
 
   if (!doorPos) {
     log(mineflayer, 'Could not find a door to use.')
@@ -404,7 +506,7 @@ export async function useDoor(mineflayer: Mineflayer, doorPos: Vec3 | null = nul
   return await operateDoor(mineflayer, doorPos)
 }
 
-async function findNearestDoor(bot: any): Promise<Vec3 | null> {
+async function findNearestDoor(mineflayer: Mineflayer): Promise<Vec3 | null> {
   const doorTypes = [
     'oak_door',
     'spruce_door',
@@ -420,7 +522,7 @@ async function findNearestDoor(bot: any): Promise<Vec3 | null> {
   ]
 
   for (const doorType of doorTypes) {
-    const block = getNearestBlock(bot, doorType, 16)
+    const block = await getNearestBlockAccurate(mineflayer, doorType, 16)
     if (block) {
       return block.position
     }
@@ -429,7 +531,7 @@ async function findNearestDoor(bot: any): Promise<Vec3 | null> {
 }
 
 async function operateDoor(mineflayer: Mineflayer, doorPos: Vec3): Promise<boolean> {
-  const doorBlock = mineflayer.bot.blockAt(doorPos)
+  const doorBlock = await getBlockAtAccurate(mineflayer, doorPos)
   await mineflayer.bot.lookAt(doorPos)
 
   if (!doorBlock) {
@@ -464,7 +566,7 @@ export async function tillAndSow(
 ): Promise<boolean> {
   const pos = { x: Math.round(x), y: Math.round(y), z: Math.round(z) }
 
-  const block = mineflayer.bot.blockAt(new Vec3(pos.x, pos.y, pos.z))
+  const block = await getBlockAtAccurate(mineflayer, new Vec3(pos.x, pos.y, pos.z))
 
   if (!block) {
     log(mineflayer, `Cannot till, no block at ${pos}.`)
@@ -476,7 +578,7 @@ export async function tillAndSow(
     return false
   }
 
-  const above = mineflayer.bot.blockAt(new Vec3(pos.x, pos.y + 1, pos.z))
+  const above = await getBlockAtAccurate(mineflayer, new Vec3(pos.x, pos.y + 1, pos.z))
 
   if (!above) {
     log(mineflayer, `Cannot till, no block above the block.`)
@@ -549,7 +651,7 @@ function fixSeedName(seedType: string): string {
 }
 
 export async function activateNearestBlock(mineflayer: Mineflayer, type: string): Promise<boolean> {
-  const block = getNearestBlock(mineflayer, type, 16)
+  const block = await getNearestBlockAccurate(mineflayer, type, 16)
   if (!block) {
     log(mineflayer, `Could not find any ${type} to activate.`)
     return false
@@ -638,7 +740,11 @@ function getValidBlocks(mineflayer: Mineflayer, blocktypes: string[], exclude: V
     )
   }
 
-  const movements = new Movements(mineflayer.bot)
+  const movements = createPathMovementsOrNull(mineflayer)
+  if (!movements) {
+    return blocks
+  }
+
   movements.dontMineUnderFallingBlock = false
   return blocks.filter(block => movements.safeToBreak(block as SafeBlock))
 }

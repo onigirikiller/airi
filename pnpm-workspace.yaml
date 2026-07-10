@@ -36,7 +36,7 @@ catalog:
   '@iconify-json/logos': ^1.2.10
   '@iconify-json/tabler': ^1.2.26
   '@moeru/eslint-config': 0.1.0-beta.15
-  '@moeru/eventa': '1.0.0-alpha.14'
+  '@moeru/eventa': 1.0.0-alpha.14
   '@moeru/std': 0.1.0-beta.14
   '@nekopaw/tempora': 0.4.0-alpha.1
   '@pinia/testing': ^1.0.3
@@ -46,6 +46,7 @@ catalog:
   '@types/hast': ^3.0.4
   '@types/splitpanes': ^2.2.6
   '@types/unist': ^3.0.3
+  '@types/ws': ^8.18.1
   '@vueuse/core': 14.1.0
   '@xsai-ext/providers': ^0.4.2
   '@xsai/embed': ^0.4.2
@@ -90,6 +91,7 @@ catalog:
   vite-plugin-mkcert: ^1.17.9
   vue: ^3.5.25
   vue-sonner: 2.0.9
+  ws: ^8.19.0
   xsschema: 0.4.0-beta.13
   zod: ^4.3.5
 

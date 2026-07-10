@@ -6,16 +6,20 @@
   "scripts": {
     "dev": "tsx --env-file=.env --env-file-if-exists=.env.local src/main.ts",
     "start": "tsx --env-file=.env --env-file-if-exists=.env.local src/main.ts",
+    "soak:supervisor": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/soak-supervisor.ts",
+    "codex:dashboard": "tsx --env-file=.env --env-file-if-exists=.env.local scripts/codex-daemon-dashboard.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
   "dependencies": {
+    "@google/genai": "^1.41.0",
     "@guiiai/logg": "catalog:",
     "@moeru/std": "catalog:",
     "@proj-airi/server-sdk": "^0.8.1",
     "awilix": "^12.0.5",
+    "canvas": "npm:@napi-rs/canvas@^0.1.92",
     "es-toolkit": "^1.44.0",
     "eventemitter3": "^5.0.4",
     "minecraft-data": "^3.102.3",
@@ -35,7 +39,11 @@
     "prismarine-windows": "^2.9.0",
     "valibot": "^1.2.0",
     "vec3": "^0.1.10",
+    "ws": "catalog:",
     "zod": "^4.3.5",
     "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@types/ws": "catalog:"
   }
 }

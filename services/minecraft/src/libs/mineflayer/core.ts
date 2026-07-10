@@ -39,6 +39,7 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
   private logger: Logg
   private commands: Map<string, EventsHandler<'command'>> = new Map()
   private ticker: Ticker = new Ticker()
+  private chatCommandHandler: ((username: string, message: string) => void) | null = null
 
   constructor(options: MineflayerOptions) {
     super()
@@ -116,21 +117,31 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
       mineflayer.logger.error('Bot died')
     })
 
+    let disconnectEmitted = false
     mineflayer.bot.on('kicked', (reason: string) => {
       mineflayer.logger.withFields({ reason }).error('Bot was kicked')
+      mineflayer.ready = false
+      if (!disconnectEmitted) {
+        disconnectEmitted = true
+        mineflayer.emit('fatal-disconnect', { reason: `kicked: ${reason}` })
+      }
     })
 
     mineflayer.bot.on('end', (reason) => {
       mineflayer.logger.withFields({ reason }).log('Bot ended')
+      mineflayer.ready = false
+      if (!disconnectEmitted) {
+        disconnectEmitted = true
+        mineflayer.emit('fatal-disconnect', { reason: `end: ${reason}` })
+      }
     })
 
     mineflayer.bot.on('error', (err: Error) => {
       mineflayer.logger.errorWithError('Bot error:', err)
     })
 
-    mineflayer.bot.on('spawn', () => {
-      mineflayer.bot.on('chat', mineflayer.handleCommand())
-    })
+    mineflayer.chatCommandHandler = mineflayer.handleCommand()
+    mineflayer.bot.on('chat', mineflayer.chatCommandHandler)
 
     mineflayer.bot.on('spawn', async () => {
       for (const plugin of options?.plugins || []) {
@@ -182,14 +193,46 @@ export class Mineflayer extends EventEmitter<EventHandlers> {
     this.ticker.on(event, cb)
   }
 
+  public getBridgeDebugState(): Record<string, unknown> | null {
+    const bridgeStateGetter = (this.bot as any)?.getBridgeDebugState
+    if (typeof bridgeStateGetter !== 'function') {
+      return null
+    }
+
+    try {
+      return bridgeStateGetter.call(this.bot) as Record<string, unknown>
+    }
+    catch {
+      return null
+    }
+  }
+
+  public async probeBridgeCapabilities(): Promise<Record<string, unknown> | null> {
+    const capabilityProbe = (this.bot as any)?.probeBridgeCapabilities
+    if (typeof capabilityProbe !== 'function') {
+      return this.getBridgeDebugState()
+    }
+
+    try {
+      return await capabilityProbe.call(this.bot) as Record<string, unknown>
+    }
+    catch {
+      return this.getBridgeDebugState()
+    }
+  }
+
   public async stop() {
+    this.ticker.stop()
     for (const plugin of this.options?.plugins || []) {
       if (plugin.beforeCleanup) {
         await plugin.beforeCleanup(this)
       }
     }
     this.components.cleanup()
-    this.bot.removeListener('chat', this.handleCommand())
+    if (this.chatCommandHandler) {
+      this.bot.removeListener('chat', this.chatCommandHandler)
+      this.chatCommandHandler = null
+    }
     this.bot.quit()
     this.removeAllListeners()
   }

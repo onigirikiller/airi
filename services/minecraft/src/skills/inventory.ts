@@ -1,64 +1,25 @@
 import type { Mineflayer } from '../libs/mineflayer'
 
+import { discard as deterministicDiscard, equip as deterministicEquip } from './actions/inventory'
 import { log } from './base'
+import { findBestFoodItem } from './food'
 import { goToPlayer, goToPosition } from './movement'
 import { getNearestBlock } from './world'
 
 export async function equip(mineflayer: Mineflayer, itemName: string): Promise<boolean> {
-  const item = mineflayer.bot.inventory.slots.find(slot => slot && slot.name === itemName)
-  if (!item) {
-    log(mineflayer, `You do not have any ${itemName} to equip.`)
-    return false
+  const equipped = await deterministicEquip(mineflayer, itemName)
+  if (equipped) {
+    log(mineflayer, `Equipped ${itemName}.`)
   }
-
-  if (itemName.includes('leggings')) {
-    await mineflayer.bot.equip(item, 'legs')
-  }
-  else if (itemName.includes('boots')) {
-    await mineflayer.bot.equip(item, 'feet')
-  }
-  else if (itemName.includes('helmet')) {
-    await mineflayer.bot.equip(item, 'head')
-  }
-  else if (itemName.includes('chestplate') || itemName.includes('elytra')) {
-    await mineflayer.bot.equip(item, 'torso')
-  }
-  else if (itemName.includes('shield')) {
-    await mineflayer.bot.equip(item, 'off-hand')
-  }
-  else {
-    await mineflayer.bot.equip(item, 'hand')
-  }
-
-  log(mineflayer, `Equipped ${itemName}.`)
-  return true
+  return equipped
 }
 
 export async function discard(mineflayer: Mineflayer, itemName: string, num = -1): Promise<boolean> {
-  let discarded = 0
-
-  while (true) {
-    const item = mineflayer.bot.inventory.items().find(item => item.name === itemName)
-    if (!item) {
-      break
-    }
-
-    const toDiscard = num === -1 ? item.count : Math.min(num - discarded, item.count)
-    await mineflayer.bot.toss(item.type, null, toDiscard)
-    discarded += toDiscard
-
-    if (num !== -1 && discarded >= num) {
-      break
-    }
+  const discarded = await deterministicDiscard(mineflayer, itemName, num)
+  if (discarded) {
+    log(mineflayer, `Discarded ${num === -1 ? 'all' : num} ${itemName}.`)
   }
-
-  if (discarded === 0) {
-    log(mineflayer, `You do not have any ${itemName} to discard.`)
-    return false
-  }
-
-  log(mineflayer, `Discarded ${discarded} ${itemName}.`)
-  return true
+  return discarded
 }
 
 export async function putInChest(mineflayer: Mineflayer, itemName: string, num = -1): Promise<boolean> {
@@ -136,12 +97,24 @@ export async function viewChest(mineflayer: Mineflayer): Promise<boolean> {
 }
 
 export async function consume(mineflayer: Mineflayer, itemName = ''): Promise<boolean> {
+  const normalizedRequestedName = itemName.trim().toLowerCase()
+  const shouldAutoSelectFood = normalizedRequestedName.length === 0
+    || normalizedRequestedName === 'food'
+    || normalizedRequestedName === 'food_item'
+  const inventoryItems = mineflayer.bot.inventory.items()
   let item
-  let name
+  let name = normalizedRequestedName || 'food'
 
-  if (itemName) {
-    item = mineflayer.bot.inventory.items().find(item => item.name === itemName)
-    name = itemName
+  if (!shouldAutoSelectFood) {
+    item = inventoryItems.find(item => item.name === normalizedRequestedName)
+    name = normalizedRequestedName
+  }
+
+  if (!item) {
+    if (shouldAutoSelectFood) {
+      item = findBestFoodItem(inventoryItems)
+      name = item?.name ?? 'food'
+    }
   }
 
   if (!item) {

@@ -1,5 +1,5 @@
 import type { ChatProvider } from '@xsai-ext/providers/utils'
-import type { UserMessage } from '@xsai/shared-chat'
+import type { AssistantMessage, CommonContentPart, UserMessage } from '@xsai/shared-chat'
 
 import type { ChatStreamEvent, ContextMessage } from '../../../types/chat'
 
@@ -10,6 +10,7 @@ import { nanoid } from 'nanoid'
 import { defineStore, storeToRefs } from 'pinia'
 import { ref, toRaw, watch } from 'vue'
 
+import { useCharacterStore } from '../../character'
 import { useChatOrchestratorStore } from '../../chat'
 import { CHAT_STREAM_CHANNEL_NAME, CONTEXT_CHANNEL_NAME } from '../../chat/constants'
 import { useChatContextStore } from '../../chat/context-store'
@@ -19,6 +20,105 @@ import { useConsciousnessStore } from '../../modules/consciousness'
 import { useProvidersStore } from '../../providers'
 import { useModsServerChannelStore } from './channel-server'
 
+function extractAssistantMessageText(message: AssistantMessage): string {
+  if (!message)
+    return ''
+
+  if (typeof message.content === 'string')
+    return message.content.trim()
+
+  if (!Array.isArray(message.content))
+    return ''
+
+  return message.content
+    .map((part) => {
+      const contentPart = part as CommonContentPart & { text?: string }
+      return contentPart.type === 'text' && typeof contentPart.text === 'string'
+        ? contentPart.text
+        : ''
+    })
+    .join('')
+    .trim()
+}
+
+interface RemoteVoicePayload {
+  provider?: string
+  model?: string
+  mimeType?: string
+  audio?: string
+}
+
+interface RemoteVoicePlaybackEvent {
+  type: 'play-remote-voice'
+  id: string
+  text?: string
+  voice: RemoteVoicePayload
+}
+
+const activeRemoteVoicePlayers = new Set<HTMLAudioElement>()
+
+function extractRemoteVoicePayload(data: unknown): RemoteVoicePayload | null {
+  if (!data || typeof data !== 'object')
+    return null
+
+  const voice = (data as { voice?: RemoteVoicePayload }).voice
+  if (!voice || typeof voice !== 'object')
+    return null
+
+  if (typeof voice.audio !== 'string' || voice.audio.trim().length === 0)
+    return null
+
+  if (typeof voice.mimeType !== 'string' || voice.mimeType.trim().length === 0)
+    return null
+
+  return {
+    provider: voice.provider,
+    model: voice.model,
+    mimeType: voice.mimeType.trim(),
+    audio: voice.audio.trim(),
+  }
+}
+
+async function tryPlayRemoteVoicePayload(voice: RemoteVoicePayload): Promise<boolean> {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined')
+    return false
+
+  const mimeType = voice.mimeType
+  const audioBase64 = voice.audio
+  if (!mimeType || !audioBase64)
+    return false
+
+  const binary = window.atob(audioBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+
+  const blob = new Blob([bytes], { type: mimeType })
+  const objectUrl = URL.createObjectURL(blob)
+  const audio = new Audio(objectUrl)
+  audio.preload = 'auto'
+  activeRemoteVoicePlayers.add(audio)
+
+  const cleanup = () => {
+    if (activeRemoteVoicePlayers.has(audio))
+      activeRemoteVoicePlayers.delete(audio)
+    URL.revokeObjectURL(objectUrl)
+  }
+
+  audio.addEventListener('ended', cleanup, { once: true })
+  audio.addEventListener('error', cleanup, { once: true })
+
+  try {
+    await audio.play()
+    return true
+  }
+  catch (error) {
+    cleanup()
+    throw error
+  }
+}
+
 export const useContextBridgeStore = defineStore('mods:api:context-bridge', () => {
   const mutex = new Mutex()
 
@@ -27,15 +127,38 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
   const serverChannelStore = useModsServerChannelStore()
+  const characterStore = useCharacterStore()
   const consciousnessStore = useConsciousnessStore()
   const providersStore = useProvidersStore()
   const { activeProvider, activeModel } = storeToRefs(consciousnessStore)
 
   const { post: broadcastContext, data: incomingContext } = useBroadcastChannel<ContextMessage, ContextMessage>({ name: CONTEXT_CHANNEL_NAME })
   const { post: broadcastStreamEvent, data: incomingStreamEvent } = useBroadcastChannel<ChatStreamEvent, ChatStreamEvent>({ name: CHAT_STREAM_CHANNEL_NAME })
+  const { post: postRemoteVoicePlayback } = useBroadcastChannel<RemoteVoicePlaybackEvent, RemoteVoicePlaybackEvent>({ name: 'airi-remote-voice-playback' })
 
   const disposeHookFns = ref<Array<() => void>>([])
   let remoteStreamGuard: { sessionId: string, generation: number } | null = null
+
+  function appendRemoteAssistantMessageToSession(text: string) {
+    const messageText = text.trim()
+    if (!messageText)
+      return
+
+    const targetSessionId = chatSession.activeSessionId
+    if (!targetSessionId)
+      return
+
+    const sessionMessages = chatSession.getSessionMessages(targetSessionId)
+    sessionMessages.push({
+      role: 'assistant',
+      content: messageText,
+      slices: [],
+      tool_results: [],
+      id: nanoid(),
+      createdAt: Date.now(),
+    })
+    chatSession.persistSessionMessages(targetSessionId)
+  }
 
   async function initialize() {
     await mutex.acquire()
@@ -142,6 +265,66 @@ export const useContextBridgeStore = defineStore('mods:api:context-bridge', () =
             }
           })
         }
+      }))
+
+      disposeHookFns.value.push(serverChannelStore.onEvent('output:gen-ai:chat:message', async (event) => {
+        const sourcePluginId = event.metadata?.source?.plugin?.id ?? ''
+        const sourceIsStageClient = sourcePluginId.includes('stage-web')
+          || sourcePluginId.includes('stage-tamagotchi')
+
+        if (sourceIsStageClient || event.data['stage-web'] || event.data['stage-tamagotchi']) {
+          return
+        }
+
+        const remoteVoice = extractRemoteVoicePayload(event.data)
+        const text = extractAssistantMessageText(event.data.message)
+        if (!remoteVoice && !text)
+          return
+
+        navigator.locks.request('context-bridge:event:output:gen-ai:chat:message', async () => {
+          try {
+            if (text) {
+              appendRemoteAssistantMessageToSession(text)
+            }
+
+            if (remoteVoice) {
+              let dispatchedToStage = false
+              try {
+                postRemoteVoicePlayback({
+                  type: 'play-remote-voice',
+                  id: nanoid(),
+                  text,
+                  voice: remoteVoice,
+                })
+                dispatchedToStage = true
+              }
+              catch (err) {
+                console.error('Error dispatching remote voice payload to stage playback channel:', err)
+              }
+
+              if (dispatchedToStage) {
+                return
+              }
+
+              try {
+                const played = await tryPlayRemoteVoicePayload(remoteVoice)
+                if (played) {
+                  return
+                }
+              }
+              catch (err) {
+                console.error('Error playing remote voice payload:', err)
+              }
+            }
+
+            if (text) {
+              await characterStore.emitTextOutput(text)
+            }
+          }
+          catch (err) {
+            console.error('Error emitting assistant output as speech:', err)
+          }
+        })
       }))
 
       disposeHookFns.value.push(

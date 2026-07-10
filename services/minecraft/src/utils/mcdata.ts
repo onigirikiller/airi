@@ -84,14 +84,23 @@ export function getItemId(itemName: string): number {
   return item?.id || 0
 }
 
+export function getItemIdForBot(bot: Bot, itemName: string): number {
+  const runtimeId = bot.registry?.itemsByName?.[itemName]?.id
+  if (typeof runtimeId === 'number' && runtimeId > 0) {
+    return runtimeId
+  }
+
+  return getItemId(itemName)
+}
+
 export function getItemName(itemId: number): string {
   const item = gameData.items[itemId]
   return item.name || ''
 }
 
-export function getBlockId(blockName: string): number {
+export function getBlockId(blockName: string): number | null {
   const block = gameData.blocksByName?.[blockName]
-  return block?.id || 0
+  return block?.id ?? null
 }
 
 export function getBlockName(blockId: number): string {

@@ -722,8 +722,16 @@ type OutputGenAiChatToolCallEvent = {
   toolCalls: ToolMessage[]
 } & Partial<WithInputSource<'stage-web' | 'stage-tamagotchi' | 'discord'>> & Partial<WithOutputSource<'gen-ai:chat'>>
 
+interface OutputGenAiChatVoicePayload {
+  provider?: string
+  model?: string
+  mimeType: string
+  audio: string
+}
+
 type OutputGenAiChatMessageEvent = {
   message: AssistantMessage
+  voice?: OutputGenAiChatVoicePayload
 } & Partial<WithInputSource<'stage-web' | 'stage-tamagotchi' | 'discord'>> & Partial<WithOutputSource<'gen-ai:chat'>>
 
 interface OutputGenAiChatUsage {

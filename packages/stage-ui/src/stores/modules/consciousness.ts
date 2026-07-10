@@ -17,6 +17,10 @@ export const useConsciousnessStore = defineStore('consciousness', () => {
 
   // Computed properties
   const supportsModelListing = computed(() => {
+    if (!activeProvider.value) {
+      return false
+    }
+
     return providersStore.getProviderMetadata(activeProvider.value)?.capabilities.listModels !== undefined
   })
 

@@ -13,6 +13,20 @@ import { config } from './config'
 let neuriAgent: Neuri | undefined
 const agents = new Set<Agent | Promise<Agent>>()
 
+function resolveProviderApiKey(): string {
+  const apiKey = config.speechLlm.apiKey.trim()
+  if (apiKey.length > 0) {
+    return apiKey
+  }
+
+  const baseUrl = config.speechLlm.baseUrl.trim().toLowerCase()
+  const localBase = baseUrl.includes('127.0.0.1')
+    || baseUrl.includes('localhost')
+    || baseUrl.includes('0.0.0.0')
+
+  return localBase ? 'local-dev' : ''
+}
+
 export async function createNeuriAgent(mineflayer: Mineflayer): Promise<Neuri> {
   useLogger().log('Initializing neuri agent')
   let n = neuri()
@@ -25,8 +39,8 @@ export async function createNeuriAgent(mineflayer: Mineflayer): Promise<Neuri> {
 
   neuriAgent = await n.build({
     provider: {
-      apiKey: config.openai.apiKey,
-      baseURL: config.openai.baseUrl,
+      apiKey: resolveProviderApiKey(),
+      baseURL: config.speechLlm.baseUrl,
     },
   })
 

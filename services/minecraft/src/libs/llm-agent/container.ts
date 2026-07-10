@@ -1,6 +1,8 @@
 import type { Logg } from '@guiiai/logg'
 import type { Neuri } from 'neuri'
 
+import type { Mineflayer } from '../mineflayer'
+
 import { useLogg } from '@guiiai/logg'
 import { asClass, asFunction, createContainer, InjectionMode } from 'awilix'
 
@@ -18,7 +20,9 @@ export interface ContainerServices {
 
 export function createAgentContainer(options: {
   neuri: Neuri
+  bot: Mineflayer
   model?: string
+  reasoningModel?: string
 }) {
   const container = createContainer<ContainerServices>({
     injectionMode: InjectionMode.PROXY,
@@ -39,6 +43,7 @@ export function createAgentContainer(options: {
       .inject(() => ({
         id: 'action',
         type: 'action' as const,
+        bot: options.bot,
       })),
 
     planningAgent: asClass(PlanningAgentImpl)
@@ -46,9 +51,10 @@ export function createAgentContainer(options: {
       .inject(() => ({
         id: 'planning',
         type: 'planning' as const,
+        bot: options.bot,
         llm: {
           agent: options.neuri,
-          model: options.model,
+          model: options.reasoningModel || options.model,
         },
       })),
 

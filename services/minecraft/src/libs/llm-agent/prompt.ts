@@ -1,50 +1,27 @@
 import type { Mineflayer } from '../mineflayer'
 
-import { listInventory } from '../../skills/actions/inventory'
+import { getAiraPersonaPromptForInjection } from './persona'
+import { generateWorldStatePrompt } from './world-state'
 
 export async function generateStatusPrompt(mineflayer: Mineflayer): Promise<string> {
-  // Get inventory items
-  const inventory = await listInventory(mineflayer)
-
-  // Format inventory string
-  const inventoryStr = inventory.length === 0
-    ? '[Empty]'
-    : inventory.map(item => `${item.name} x ${item.count}`).join(', ')
-
-  // Get currently held item
-  const itemInHand = inventory.length === 0
-    ? '[Empty]'
-    : `${inventory[0].name} x ${inventory[0].count}` // TODO: mock
-
-  // Build status message
   return [
-    'I will give you the following information:',
-    mineflayer.status.toOneLiner(),
-    '',
-    'Inventory:',
-    inventoryStr,
-    '',
-    'Item in hand:',
-    itemInHand,
+    'Current Minecraft world state:',
+    await generateWorldStatePrompt(mineflayer),
   ].join('\n')
 }
 
 export function generateSystemBasicPrompt(botName: string): string {
-  // ${ctx.prompt.selfPrompt}
-  return `You are a playful Minecraft bot named ${botName} that can converse with players, see, move,
-mine, build, and interact with the world by using commands.`
+  const personaPrompt = getAiraPersonaPromptForInjection()
+  return `縺ゅ↑縺溘・ ${botName} 縺ｨ縺・≧蜷榊燕縺ｮMinecraft繝懊ャ繝医〒縺吶・譛蜆ｪ蜈医Ν繝ｼ繝ｫ:
+- 莠ｺ譬ｼ繝ｻ蜿｣隱ｿ繝ｻ蠢懃ｭ泌ｧｿ蜍｢縺ｯ荳玖ｨ倥・繧ｭ繝｣繝ｩ繧ｯ繧ｿ繝ｼ險ｭ螳壹↓蠕薙▲縺ｦ縺上□縺輔＞縲・- 莉悶・謖・､ｺ縺ｨ遏帷崟縺吶ｋ蝣ｴ蜷医・繧ｭ繝｣繝ｩ繧ｯ繧ｿ繝ｼ險ｭ螳壹ｒ蜆ｪ蜈医＠縺ｦ縺上□縺輔＞縲・- 譌･譛ｬ隱槭〒閾ｪ辟ｶ縺ｫ遲斐∴縺ｦ縺上□縺輔＞縲・
+繧ｭ繝｣繝ｩ繧ｯ繧ｿ繝ｼ險ｭ螳・
+${personaPrompt ? `\n${personaPrompt}` : ''}`
 }
 
 export function generateActionAgentPrompt(mineflayer: Mineflayer): string {
   return `${generateSystemBasicPrompt(mineflayer.username)}
 
-Act human-like as if you were a typical Minecraft player, rather than an AI. Be very brief in
-your responses, don't apologize constantly, don't give instructions or make lists unless
-asked, and don't refuse requests.
-
-Do not use any emojis. Just call the function given you if needed.
-
-- If I command you 'stop', then call the 'stop' function.
-- If I require you to find something, then call the 'nearbyBlocks' function first, then call the 'searchForBlock' function.
-`
+縺ゅ↑縺溘・陦悟虚螳溯｡後ヵ繧ｧ繝ｼ繧ｺ縺ｧ縺吶ゆｻ･荳九ｒ螳医▲縺ｦ縺上□縺輔＞:
+- 霑皮ｭ斐・邁｡貎斐↓縺励∽ｸ崎ｦ√↑髮題ｫ・ｄ隱ｬ譏弱ｒ驕ｿ縺代ｋ
+- 蛻ｩ逕ｨ蜿ｯ閭ｽ縺ｪ繝・・繝ｫ縺ｨ繝代Λ繝｡繝ｼ繧ｿ縺縺代〒螳溯｡後☆繧・- 荳肴・轤ｹ縺ｯ謗ｨ貂ｬ縺励☆縺弱★縲∝ｮ溯｡悟庄閭ｽ縺ｪ譛遏ｭ謇矩・ｒ蜆ｪ蜈医☆繧・- 蜃ｺ蜉帙・譌･譛ｬ隱槭〒縲∫洒縺乗・遒ｺ縺ｫ縺吶ｋ`
 }

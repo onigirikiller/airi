@@ -12,6 +12,7 @@ export interface EventHandlers {
   'time:noon': (ctx: Context) => void
   'time:sunset': (ctx: Context) => void
   'time:midnight': (ctx: Context) => void
+  'fatal-disconnect': (ctx: { reason: string }) => void
 }
 
 export type Events = keyof EventHandlers

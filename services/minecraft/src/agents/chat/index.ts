@@ -10,6 +10,7 @@ export class ChatAgentImpl extends AbstractAgent implements ChatAgent {
   private maxHistoryLength: number
   private idleTimeout: number
   private llmConfig: ChatAgentConfig['llm']
+  private idleCheckTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(config: ChatAgentConfig) {
     super(config)
@@ -26,12 +27,20 @@ export class ChatAgentImpl extends AbstractAgent implements ChatAgent {
       await this.handleAgentMessage(sender, message)
     })
 
-    setInterval(() => {
+    if (this.idleCheckTimer) {
+      clearInterval(this.idleCheckTimer)
+    }
+
+    this.idleCheckTimer = setInterval(() => {
       this.checkIdleChats()
     }, 60 * 1000)
   }
 
   protected async destroyAgent(): Promise<void> {
+    if (this.idleCheckTimer) {
+      clearInterval(this.idleCheckTimer)
+      this.idleCheckTimer = null
+    }
     this.activeChats.clear()
     this.removeAllListeners()
   }

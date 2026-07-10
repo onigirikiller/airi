@@ -8,6 +8,7 @@ import { withRetry } from '@moeru/std'
 
 import { config } from '../../composables/config'
 import { useLogger } from '../../utils/logger'
+import { isLikelyOllamaBaseUrl, unloadOllamaModel, withSerializedGpuTask } from '../gpu-coordinator'
 
 export abstract class BaseLLMHandler {
   protected logger: Logger
@@ -21,13 +22,40 @@ export abstract class BaseLLMHandler {
     route: string,
     messages: Message[],
   ): Promise<LLMResponse> {
-    const completion = await context.reroute(route, messages, {
-      model: this.config.model ?? config.openai.model,
-    }) as ChatCompletion | ChatCompletion & { error: { message: string } }
+    const speechBaseUrl = config.speechLlm.baseUrl
+    const speechModel = config.speechLlm.model
+    const completionOptions: any = {
+      model: this.config.model ?? speechModel,
+    }
+
+    if (route === 'planning') {
+      completionOptions.max_tokens = 900
+      completionOptions.temperature = 0.2
+    }
+    else if (route === 'chat') {
+      completionOptions.max_tokens = 256
+      completionOptions.temperature = 0.6
+    }
+    else if (route === 'action') {
+      completionOptions.max_tokens = 192
+      completionOptions.temperature = 0.2
+    }
+
+    const reroute = async () => await context.reroute(route, messages, completionOptions) as ChatCompletion | ChatCompletion & { error: { message: string } }
+    const completion = isLikelyOllamaBaseUrl(speechBaseUrl)
+      ? await withSerializedGpuTask(`ollama:handler.${route}`, this.logger, async () => {
+          try {
+            return await reroute()
+          }
+          finally {
+            await unloadOllamaModel(speechBaseUrl, String(completionOptions.model || speechModel), this.logger)
+          }
+        })
+      : await reroute()
 
     if (!completion || 'error' in completion) {
       this.logger.withFields(context).error('Completion failed')
-      throw new Error(completion?.error?.message ?? 'Unknown error')
+      throw new Error((completion as any)?.error?.message ?? 'Unknown error')
     }
 
     const content = await completion.firstContent()
