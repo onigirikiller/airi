@@ -6,6 +6,7 @@ import type { MineflayerPlugin } from '../libs/mineflayer/plugin'
 
 import { EmotionEngine, setActiveEmotionEngine } from '../autonomy/emotion'
 import { AutonomousStreamOrchestrator } from '../autonomy/orchestrator'
+import { QuestTracker } from '../autonomy/quest-tracker'
 import { ReflexController } from '../autonomy/reflex'
 import { VoiceBank } from '../libs/llm-agent/voice-bank'
 
@@ -13,6 +14,7 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
   let orchestrator: AutonomousStreamOrchestrator | null = null
   let reflex: ReflexController | null = null
   let voiceBank: VoiceBank | null = null
+  let questTracker: QuestTracker | null = null
   let deathReactionHandler: (() => void) | null = null
 
   let spawnFallbackMineflayer: Mineflayer | null = null
@@ -20,6 +22,7 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
   const handleSpawnFallback = (): void => {
     reflex?.start()
     orchestrator?.start()
+    questTracker?.start()
     void voiceBank?.prepare()
   }
 
@@ -50,6 +53,7 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
         airiClient,
         reflex,
       )
+      questTracker = new QuestTracker(mineflayer as Mineflayer, voiceBank)
 
       if ((mineflayer as Mineflayer & { ready?: boolean }).ready) {
         handleSpawnFallback()
@@ -72,6 +76,8 @@ export function AutonomyPlugin(airiClient: Client): MineflayerPlugin {
       reflex?.removeAllListeners?.()
       reflex?.stop()
       reflex = null
+      questTracker?.stop()
+      questTracker = null
       voiceBank = null
       setActiveEmotionEngine(undefined)
     },
