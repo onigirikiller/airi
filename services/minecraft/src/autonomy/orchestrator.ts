@@ -31,7 +31,6 @@ import { ActionAbortedError } from '../libs/mineflayer/action-abort'
 import { emitFallbackMonitor, monitorBus } from '../libs/monitor-event-bus'
 import { getNearestEntityWhere } from '../skills/world'
 import { useLogger } from '../utils/logger'
-import { isHostile } from '../utils/mcdata'
 import { GeminiAutonomyDecisionProvider } from './decision-provider'
 import { getActiveEmotionEngine } from './emotion'
 import { runInInferenceLane } from './inference-lane'
@@ -41,6 +40,7 @@ import { incrementMetric } from './metrics'
 import { buildDeterministicNarration } from './narration'
 import { classifyGoalType, collectWorldFacts, describeGoalConstraint } from './preconditions'
 import { buildProgressionSnapshot, buildStallRecoveryGoal, ProgressWatchdog } from './progress'
+import { isHostileEntity } from './reflex'
 import { YouTubeLiveChatBridge } from './youtube-live-chat'
 
 function clampImportance(value: number): number {
@@ -530,7 +530,7 @@ export class AutonomousStreamOrchestrator {
     try {
       const facts = collectWorldFacts(this.bot)
       const snapshot = this.buildProgressionSnapshotSafe()
-      const hostile = getNearestEntityWhere(this.bot as any, entity => isHostile(entity), 8)
+      const hostile = getNearestEntityWhere(this.bot as any, entity => isHostileEntity(entity), 8)
       const fact = describeDeathLesson(facts, hostile?.name ?? undefined)
       this.lessons?.record({
         trigger: 'death',
@@ -642,6 +642,48 @@ export class AutonomousStreamOrchestrator {
 
   private tickInFlight = false
   private consecutiveTickErrors = 0
+  private lastWorldTickSignature = ''
+  private worldTickStalledCount = 0
+  private worldPausedLogged = false
+  private nextDecisionNotBefore = 0
+
+  /**
+   * Singleplayer pauses (ESC menu, pauseOnLostFocus) freeze the integrated
+   * server: time, position, and health all stop changing. Burning LLM
+   * decisions against a frozen world is pure waste, so goal selection is
+   * suspended until the world ticks again.
+   */
+  private isWorldPaused(): boolean {
+    const bot = this.bot.bot as any
+    const time = Number(bot?.time?.timeOfDay ?? -1)
+    const position = bot?.entity?.position
+    const signature = [
+      time,
+      position ? `${Number(position.x).toFixed(2)},${Number(position.y).toFixed(2)},${Number(position.z).toFixed(2)}` : 'na',
+      Number(bot?.health ?? -1),
+      Number(bot?.food ?? -1),
+    ].join('|')
+
+    if (signature !== this.lastWorldTickSignature) {
+      this.lastWorldTickSignature = signature
+      this.worldTickStalledCount = 0
+      if (this.worldPausedLogged) {
+        this.worldPausedLogged = false
+        this.logger.log('World resumed ticking; autonomy decisions re-enabled')
+      }
+      return false
+    }
+
+    this.worldTickStalledCount++
+    if (this.worldTickStalledCount < 2) {
+      return false
+    }
+    if (!this.worldPausedLogged) {
+      this.worldPausedLogged = true
+      this.logger.warn('World appears paused (time/position/health frozen); suspending LLM decisions')
+    }
+    return true
+  }
 
   private async tick(): Promise<void> {
     if (!this.started)
@@ -692,6 +734,11 @@ export class AutonomousStreamOrchestrator {
 
     // Survival reflexes own the bot while engaged; planning and recovery wait.
     if (this.reflex?.isEngaged()) {
+      return
+    }
+
+    // Frozen world = no decisions, no recovery, no commentary.
+    if (!this.executing && this.isWorldPaused()) {
       return
     }
 
@@ -803,6 +850,7 @@ export class AutonomousStreamOrchestrator {
       && now - signal.timestamp <= SOCIAL_SIGNAL_BYPASS_WINDOW_MS,
     )
     const reachedMinGoalInterval = now - this.lastGoalAt >= config.autonomy.minGoalIntervalMs
+      && now >= this.nextDecisionNotBefore
     const shouldAttemptGoalSelection = reachedMinGoalInterval || Boolean(highPrioritySignal) || hasRecentSocialSignal
 
     if (!shouldAttemptGoalSelection) {
@@ -2482,6 +2530,7 @@ export class AutonomousStreamOrchestrator {
       monitorBus.emitMonitor('orchestrator:goalCompleted', { goal })
       getActiveEmotionEngine()?.impulse('goal-success')
       this.consecutiveGoalFailures = 0
+      this.nextDecisionNotBefore = 0
       this.recordGoalSuccess(goal)
       this.bot.memory?.completeGoal?.(goal, { success: true })
       this.scheduleGoalResultCommentary(goal, true)
@@ -2492,6 +2541,9 @@ export class AutonomousStreamOrchestrator {
         // Interruptions (reflexes, watchdogs, supersession) are not planning
         // failures: do not trip the circuit breaker or queue recovery.
         this.logger.withFields({ goal, reason: error.reason }).warn('Autonomy goal interrupted')
+        // Interruption loops (watchdogs on a stuck world) must not re-decide
+        // at full cadence; give the world a moment before the next LLM call.
+        this.nextDecisionNotBefore = Math.max(this.nextDecisionNotBefore, Date.now() + 15_000)
         this.pushSignal({
           id: randomUUID(),
           source: 'system',
@@ -2509,6 +2561,13 @@ export class AutonomousStreamOrchestrator {
       this.lastGoalFailureAt = Date.now()
       this.recordGoalFailure(goal, errorMessage)
       getActiveEmotionEngine()?.impulse('goal-failure')
+      // Escalating decision backoff: repeated failures make each LLM call
+      // less likely to help, so pace them instead of burning the budget.
+      const failureBackoffMs = Math.min(
+        30_000 * 2 ** Math.max(0, this.consecutiveGoalFailures - 1),
+        10 * 60_000,
+      )
+      this.nextDecisionNotBefore = Math.max(this.nextDecisionNotBefore, Date.now() + failureBackoffMs)
       if (this.consecutiveGoalFailures >= 2) {
         try {
           const facts = collectWorldFacts(this.bot)

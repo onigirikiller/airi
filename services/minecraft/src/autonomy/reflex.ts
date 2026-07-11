@@ -54,6 +54,22 @@ const EMERGENCY_RETREAT_DISTANCE = 16
 const LAVA_ESCAPE_DISTANCE = 8
 
 /**
+ * FabricBridge entities carry their own isHostile flag with a concrete mob
+ * type string; classic mineflayer entities need the mcdata heuristic.
+ */
+export function isHostileEntity(entity: Entity): boolean {
+  const flagged = (entity as any)?.isHostile
+  if (typeof flagged === 'boolean') {
+    return flagged
+  }
+  return isHostile(entity)
+}
+
+function isCreeperEntity(entity: Entity): boolean {
+  return (entity.name ?? '').toLowerCase().includes('creeper')
+}
+
+/**
  * Always-on survival reflexes that react to danger on game-event timescales
  * without any LLM involvement. A reflex response preempts whatever action is
  * currently executing via the shared action-abort mechanism, runs a
@@ -146,6 +162,8 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
     }
   }
 
+  private lastEntityRefreshAt = 0
+
   private async evaluate(trigger: 'scan' | 'damage'): Promise<void> {
     if (!this.started || this.engaged) {
       return
@@ -160,9 +178,25 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
       return
     }
 
+    // FabricBridge exposes entities via an on-demand fetch instead of a live
+    // mirror; without this refresh the reflex layer would never see hostiles.
+    const refreshEntities = (this.mineflayer.bot as any).refreshEntities
+    if (typeof refreshEntities === 'function' && now - this.lastEntityRefreshAt >= 1_000) {
+      this.lastEntityRefreshAt = now
+      try {
+        await refreshEntities.call(this.mineflayer.bot, HOSTILE_SCAN_DISTANCE + 4)
+      }
+      catch {
+        return
+      }
+      if (!this.started || this.engaged) {
+        return
+      }
+    }
+
     let hostiles: Entity[] = []
     try {
-      hostiles = getNearbyEntities(this.mineflayer, HOSTILE_SCAN_DISTANCE).filter(entity => isHostile(entity))
+      hostiles = getNearbyEntities(this.mineflayer, HOSTILE_SCAN_DISTANCE).filter(entity => isHostileEntity(entity))
     }
     catch {
       return
@@ -179,7 +213,7 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
 
     // 1. Creepers about to detonate outrank everything else.
     const creeper = hostiles
-      .filter(entity => entity.name === 'creeper')
+      .filter(entity => isCreeperEntity(entity))
       .sort((left, right) => distanceTo(left) - distanceTo(right))[0]
     if (creeper && distanceTo(creeper) <= this.creeperDangerDistance) {
       await this.respond('creeper-flee', `creeper at ${distanceTo(creeper).toFixed(1)} blocks`, async () => {
