@@ -849,9 +849,23 @@ export class AutonomousStreamOrchestrator {
       && signal.importance >= SOCIAL_SIGNAL_BYPASS_IMPORTANCE
       && now - signal.timestamp <= SOCIAL_SIGNAL_BYPASS_WINDOW_MS,
     )
+    const decisionPacingActive = now < this.nextDecisionNotBefore
     const reachedMinGoalInterval = now - this.lastGoalAt >= config.autonomy.minGoalIntervalMs
-      && now >= this.nextDecisionNotBefore
-    const shouldAttemptGoalSelection = reachedMinGoalInterval || Boolean(highPrioritySignal) || hasRecentSocialSignal
+      && !decisionPacingActive
+    // System signals (stall detectors, watchdogs) must not bypass decision
+    // pacing: they linger in the buffer for minutes and would otherwise
+    // trigger an LLM call every tick. A system signal may pull one decision
+    // forward only when it arrived after the last one and no backoff is
+    // active; genuine social signals keep their own fast path.
+    const urgentSocialSignal = Boolean(highPrioritySignal
+      && (highPrioritySignal.source === 'player' || highPrioritySignal.source === 'youtube'))
+    const freshSystemSignalBypass = Boolean(highPrioritySignal)
+      && !decisionPacingActive
+      && (highPrioritySignal?.timestamp ?? 0) > this.lastGoalAt
+    const shouldAttemptGoalSelection = reachedMinGoalInterval
+      || urgentSocialSignal
+      || hasRecentSocialSignal
+      || freshSystemSignalBypass
 
     if (!shouldAttemptGoalSelection) {
       await this.emitAmbientChatIfNeeded(now)

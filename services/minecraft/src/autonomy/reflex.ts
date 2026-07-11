@@ -93,6 +93,8 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
   private lastKnownHealth: number | null = null
   private lastDamageAt = 0
   private scanTimer: ReturnType<typeof setInterval> | null = null
+  private lastResponseKind: ReflexKind | null = null
+  private consecutiveSameKind = 0
 
   constructor(
     private readonly mineflayer: Mineflayer,
@@ -169,7 +171,14 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
       return
     }
     const now = Date.now()
-    if (now - this.lastResponseAt < this.cooldownMs) {
+    // Repeatedly firing the same reflex means it is not resolving the threat
+    // (e.g. surrounded at night). Escalating the cooldown lets the planner
+    // get a word in instead of ping-ponging interruptions forever.
+    const effectiveCooldownMs = Math.min(
+      this.cooldownMs * 2 ** Math.min(5, this.consecutiveSameKind),
+      60_000,
+    )
+    if (now - this.lastResponseAt < effectiveCooldownMs) {
       return
     }
 
@@ -200,6 +209,12 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
     }
     catch {
       return
+    }
+
+    if (hostiles.length === 0) {
+      // Threat cleared: future reflexes respond at full speed again.
+      this.consecutiveSameKind = 0
+      this.lastResponseKind = null
     }
 
     const distanceTo = (entity: Entity): number => {
@@ -289,6 +304,8 @@ export class ReflexController extends EventEmitter<{ reflex: (event: ReflexEvent
     finally {
       this.mineflayer.completeAction(signal)
       this.lastResponseAt = Date.now()
+      this.consecutiveSameKind = this.lastResponseKind === kind ? this.consecutiveSameKind + 1 : 0
+      this.lastResponseKind = kind
       this.engaged = null
       monitorBus.emitMonitor('reflex:resolved', { kind })
     }
