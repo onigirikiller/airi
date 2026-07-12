@@ -417,3 +417,22 @@ describe('endgame progression toward the ender dragon', () => {
     expect(withEyes).toBeGreaterThan(withRods)
   })
 })
+
+describe('critical night survival guidance', () => {
+  it('recommends sealing a shelter when hurt and starving at night', () => {
+    const snapshot = buildProgressionSnapshot(makeFacts({
+      timeOfDay: 'night',
+      health: 5,
+      food: 3,
+      foodItemCount: 0,
+    }))
+    expect(snapshot.blockers).toContain('too-weak-for-night-work')
+    expect(snapshot.nextGoals[0].toLowerCase()).toContain('shelter')
+  })
+
+  it('does not suggest hiding when healthy in daytime', () => {
+    const snapshot = buildProgressionSnapshot(makeFacts())
+    expect(snapshot.blockers).not.toContain('too-weak-for-night-work')
+    expect(snapshot.nextGoals.join(' ').toLowerCase()).not.toContain('seal yourself')
+  })
+})

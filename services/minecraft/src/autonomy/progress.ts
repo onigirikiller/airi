@@ -573,6 +573,16 @@ function buildNeedsAndBlockers(
     nextGoals.unshift(facts.foodItemCount > 0 ? 'Consume available food' : 'Collect nearby food')
   }
 
+  // Critically hurt at night with nothing to eat: gathering skills refuse to
+  // run while unsafe, food is unreachable in the dark, and hostiles roam.
+  // The only winning move is to seal a tiny shelter and let the night pass.
+  const criticallyWeakAtNight = facts.timeOfDay === 'night'
+    && (facts.health <= 8 || (facts.foodItemCount === 0 && facts.food <= 6))
+  if (criticallyWeakAtNight) {
+    blockers.push('too-weak-for-night-work')
+    nextGoals.unshift('Seal yourself into a tiny dirt/cobblestone shelter and stay inside until morning')
+  }
+
   return {
     unresolvedNeeds,
     blockers,
