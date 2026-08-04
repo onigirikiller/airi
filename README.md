@@ -174,7 +174,7 @@
 > | Baritone `.jar` files | LGPL-3.0 — the mod builds against Baritone, but the binaries are not redistributed here |
 > | Style-Bert-VITS2 voice model weights | Third-party model under its own corpus licence |
 > | `runtime/` soak logs and screenshots | Local run artefacts; the worklog is the durable record |
-> | All `.env` files with real values | Only `local-dev` placeholders and empty keys are tracked |
+> | Real API keys and tokens | Tracked `.env` files carry public defaults and placeholders only; real values belong in gitignored `.env.local`. Each tracked `.env` says so in a header. |
 >
 > Full licence boundary, including the one file in this repository that is **not** MIT, is recorded in
 > **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**.

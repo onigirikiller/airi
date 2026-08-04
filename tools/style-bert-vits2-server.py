@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 #
-# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 onigirikiller
 #
 # NOTE ON LICENSING - this file is NOT under the repository's MIT licence.
 #
 # It imports Style-Bert-VITS2 (https://github.com/litagin02/Style-Bert-VITS2) directly, which is
-# licensed under AGPL-3.0. This wrapper is therefore distributed under AGPL-3.0-or-later, and if you
-# run a modified version of it as a network service you must offer the corresponding source to your
-# users. The rest of this repository remains MIT; see THIRD_PARTY_NOTICES.md for the boundary.
+# licensed AGPL-3.0. Upstream does not grant an "or later" option, so this file is AGPL-3.0-only.
+# The full licence text is in LICENSES/AGPL-3.0-only.txt; see also THIRD_PARTY_NOTICES.md.
 #
-# If you want to avoid AGPL obligations entirely, do not use this wrapper. Run the official
-# Style-Bert-VITS2 server as a separate process and point LOCAL_TTS_BASEURL at it instead - the
-# agent only ever speaks to it over HTTP.
+# If you run a modified version of this file as a network service, AGPL section 13 requires you to
+# offer the corresponding source to its users.
+#
+# To keep AGPL obligations out of the rest of this project, do not use this wrapper: run the
+# official Style-Bert-VITS2 server as a separate process and point LOCAL_TTS_BASEURL at it. That
+# separates this repository from AGPL code - it does not remove AGPL from the official server
+# itself, which remains AGPL-licensed however you run it.
 #
 """
 Minimal Style-Bert-VITS2 HTTP server compatible with minecraft-bot local TTS.
