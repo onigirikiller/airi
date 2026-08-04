@@ -1,3 +1,52 @@
+> ## About this fork
+>
+> This is a fork of **[moeru-ai/airi](https://github.com/moeru-ai/airi)** by Neko Ayaka, used under the MIT
+> Licence. All upstream code, branding and documentation belong to the original authors — see
+> [LICENSE](LICENSE). Everything below this box is upstream's README, unchanged.
+>
+> ### What this fork adds
+>
+> An **autonomous Minecraft agent layer** driven by a local LLM, on branch
+> [`feat/autonomous-vtuber-overhaul`](https://github.com/onigirikiller/airi/tree/feat/autonomous-vtuber-overhaul).
+> The baseline commit `7af2ee38` marks exactly where upstream ends and this work begins:
+>
+> ```bash
+> git diff 7af2ee38..HEAD --stat
+> ```
+>
+> | Area | What it does |
+> |---|---|
+> | `services/minecraft/src/autonomy/` | Inference-lane scheduling, run metrics, objective selection, knowledge retrieval, YouTube live-chat intake |
+> | `services/minecraft/src/libs/fabric-bridge/` | Fabric mod bridge — bot proxy that survives short restarts, pathfinding wrapper, session resume tolerant of a late listener |
+> | `services/minecraft/src/libs/llm-agent/` | Plan locking against concurrent replanning, canonical world-state prompt view, persona handling |
+> | `services/minecraft/src/libs/llm-usage/` | Token budget guard with free-tier enforcement and per-scope usage accounting |
+> | `services/minecraft/src/skills/` | Gathering, crafting, combat, navigation and recovery actions |
+> | `apps/connect-four-arena/` | **Persona Four** — two LLM personas play Connect Four sharing one board but with isolated conversation histories, so persona prompts can be compared on identical game state |
+>
+> ### Engineering records
+>
+> The parts most worth reading are the logs, not the code:
+>
+> - **[AUTONOMY_WORKLOG.md](AUTONOMY_WORKLOG.md)** — every live soak run recorded as *live observations → hypothesis → changes*, with the run log and screenshot each conclusion came from.
+> - **[AUTONOMY_BENCHMARKS.md](AUTONOMY_BENCHMARKS.md)** — stage gates with PASS/FAIL status and the reasoning behind each verdict.
+> - **[AUTONOMY_CHECKLIST.md](AUTONOMY_CHECKLIST.md)** — open work, stated honestly, including what is still blocked and why.
+> - **[code_review.md](code_review.md)** — a self-audit checking that no fixed `wood → stone → iron → diamond` script, no seed-specific coordinates, and no benchmark-only branch leaked into the production autonomy path.
+>
+> ### Not included in this repository, deliberately
+>
+> | Excluded | Reason |
+> |---|---|
+> | Game ROMs and an emulator binary | Copyrighted; the emulator is GPL and cannot be redistributed from an MIT repo |
+> | Baritone `.jar` files | LGPL-3.0 — the mod builds against Baritone, but the binaries are not redistributed here |
+> | Style-Bert-VITS2 voice model weights | Third-party model under its own corpus licence |
+> | `runtime/` soak logs and screenshots | Local run artefacts; the worklog is the durable record |
+> | All `.env` files with real values | Only `local-dev` placeholders and empty keys are tracked |
+>
+> ### Status
+>
+> Work in progress, and the checklist says so. Some stages are verified live; others are blocked on
+> sandbox restrictions documented in the worklog. Nothing here claims to be finished.
+
 <picture>
   <source
     width="100%"
