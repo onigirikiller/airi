@@ -34,8 +34,10 @@ An intelligent Minecraft bot powered by LLM. AIRI can understand natural languag
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/moeru-ai/airi.git
-cd services/minecraft
+# This fork, on the branch that carries the autonomy layer.
+# Cloning moeru-ai/airi instead will give you upstream WITHOUT any of it.
+git clone -b feat/autonomous-vtuber-overhaul https://github.com/onigirikiller/airi.git
+cd airi/services/minecraft
 ```
 
 2. Install dependencies:

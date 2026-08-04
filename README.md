@@ -1,80 +1,159 @@
-> ## About this fork
+> # An autonomous Minecraft AI VTuber, built on AIRI
 >
-> This is a fork of **[moeru-ai/airi](https://github.com/moeru-ai/airi)** by Neko Ayaka, used under the MIT
-> Licence. All upstream code, branding and documentation belong to the original authors — see
-> [LICENSE](LICENSE). Everything below this box is upstream's README, unchanged.
+> This fork turns [moeru-ai/airi](https://github.com/moeru-ai/airi)'s command-driven Minecraft bot into
+> an agent that **decides what to do by itself, survives without supervision, and streams while it
+> plays** — commentary in Japanese, emotional voice, OBS subtitles, a first-person viewer, and YouTube
+> live-chat replies.
 >
-> ### What this fork adds
+> It is not "an LLM presses buttons in Minecraft". The agent picks its own objectives from world state,
+> plans actions, recovers when it falls down a shaft, remembers what killed it last time, reacts to
+> creepers faster than an LLM round-trip allows, and holds a spending ceiling so a stuck run cannot burn
+> an API quota. **47 of 52 benchmark gates pass on live runs; the 5 that fail are named below.**
 >
-> An **autonomous Minecraft agent layer** driven by a local LLM, on branch
-> [`feat/autonomous-vtuber-overhaul`](https://github.com/onigirikiller/airi/tree/feat/autonomous-vtuber-overhaul).
-> The baseline commit `7af2ee38` marks exactly where upstream ends and this work begins:
+> Fork of moeru-ai/airi by Neko Ayaka, used under the MIT Licence. All upstream code, branding and
+> documentation belong to the original authors — see [LICENSE](LICENSE). Everything below this box is
+> upstream's README, unchanged.
+>
+> ---
+>
+> ## Quick start (Windows)
+>
+> > **Every headline feature is `false` by default.** Starting the bot without the configuration below
+> > gives you upstream's command-driven bot and nothing from this fork. This trips up everyone.
 >
 > ```bash
-> git diff 7af2ee38..HEAD --stat
+> git clone -b feat/autonomous-vtuber-overhaul https://github.com/onigirikiller/airi.git
+> cd airi
+> pnpm install
 > ```
 >
-> | Area | What it does |
-> |---|---|
-> | `services/minecraft/src/autonomy/` | Inference-lane scheduling, run metrics, objective selection, knowledge retrieval, YouTube live-chat intake |
-> | `services/minecraft/src/libs/fabric-bridge/` | Fabric mod bridge — bot proxy that survives short restarts, pathfinding wrapper, session resume tolerant of a late listener |
-> | `services/minecraft/src/libs/llm-agent/` | Plan locking against concurrent replanning, canonical world-state prompt view, persona handling |
-> | `services/minecraft/src/libs/llm-usage/` | Token budget guard with free-tier enforcement and per-scope usage accounting |
-> | `services/minecraft/src/skills/` | Gathering, crafting, combat, navigation and recovery actions |
-> | `apps/connect-four-arena/` | **Persona Four** — two LLM personas play Connect Four sharing one board but with isolated conversation histories, so persona prompts can be compared on identical game state |
+> Then create **`services/minecraft/.env.local`** — never `.env`, which is tracked:
 >
-> ### How to run it
+> ```env
+> # --- Required to get anything from this fork ---
+> AUTONOMY_ENABLED=true
+> AUTONOMY_LLM_ENABLED=true
+> FABRIC_BRIDGE_ENABLED=true
+> FABRIC_BRIDGE_PORT=8089
+> BOT_VERSION=1.20.4
 >
-> **Setup guide: [`services/minecraft/docs/autonomous-vtuber.md`](services/minecraft/docs/autonomous-vtuber.md)** —
-> every environment variable, with defaults.
+> # --- LLM: any OpenAI-compatible endpoint. Local Ollama shown. ---
+> AUTONOMY_LLM_BASE_URL=http://localhost:11434/v1
+> AUTONOMY_LLM_MODEL=gemma4:e4b
+> AUTONOMY_LLM_API_KEY=
 >
-> Note that [`services/minecraft/README.md`](services/minecraft/README.md) is upstream's and describes
-> the original command-driven bot, not this autonomy layer.
+> # --- Optional: streaming surfaces ---
+> MONITOR_ENABLED=true
+> LOCAL_TTS_ENABLED=false
+> VIEWER_ENABLED=false
+> ```
 >
-> You need four things running:
+> Build the bridge mod ([`services/minecraft-fabric-mod/`](services/minecraft-fabric-mod) — its README
+> covers the Baritone jars you must supply yourself), launch Minecraft 1.20.4 with Fabric, then:
 >
-> | # | Component | Notes |
-> |---|---|---|
-> | 1 | **Minecraft 1.20.4 + Fabric** with the bridge mod | Build it from [`services/minecraft-fabric-mod/`](services/minecraft-fabric-mod) — that README covers the Baritone jars you must supply yourself |
-> | 2 | **An OpenAI-compatible LLM endpoint** | Ollama, LM Studio or a hosted API. Runs have used `gemma4:e4b` locally and Gemini Flash remotely |
-> | 3 | **A local TTS server** (optional) | `tools/style-bert-vits2-server.py` or `tools/irodori-tts-server.py`; skip for a silent agent |
-> | 4 | **The agent itself** | `pnpm -F @proj-airi/minecraft-bot dev`, or `start-airi-minecraft.bat` on Windows, which starts the viewer, HUD and monitor ports too |
+> ```bash
+> start-airi-minecraft-local.bat --dry-run   # prints what it would launch, starts nothing
+> start-airi-minecraft-local.bat             # for real
+> ```
 >
-> Configuration goes in `services/minecraft/.env.local` — never `.env`, which is tracked. Start from
-> the setup guide's variable list.
+> Requirements: **Node.js 24** (what upstream CI builds on), **pnpm 10.28.1** (pinned via
+> `packageManager`), **JDK 17** (`options.release.set(17)` in the mod build), **Minecraft 1.20.4**
+> with **Fabric Loader 0.16.10** and **Fabric API 0.91.2+1.20.4**.
 >
-> **Persona Four** is independent of all of the above and is the quickest thing to try:
+> **Persona Four** needs none of this and is the fastest thing to try:
 >
 > ```bash
 > pnpm -F @proj-airi/connect-four-arena dev
 > ```
 >
-> It defaults to LM Studio's OpenAI-compatible endpoint at `http://localhost:1234/v1/`. Start LM Studio
-> with CORS enabled, open the arena, and two personas will play each other.
+> Two LLM personas play Connect Four on one shared board with isolated conversation histories, so you
+> can see how a persona prompt changes tactical choices. Defaults to LM Studio at
+> `http://localhost:1234/v1/` with CORS enabled.
 >
-> ### What the autonomy layer actually does
+> ## What actually works today
 >
-> Beyond upstream's command-driven bot, this fork makes the agent decide for itself:
+> Taken from [AUTONOMY_BENCHMARKS.md](AUTONOMY_BENCHMARKS.md), which records live-run verdicts rather
+> than intentions.
 >
-> - **Objective selection** — picks its own next goal from world state rather than following a fixed progression script, with the hardcode audit in [`code_review.md`](code_review.md) checking that no fixed `wood → stone → iron → diamond` fallback crept back in
-> - **Survival reflexes** — event-driven responses that pre-empt the planner when health or light drops
-> - **Lesson memory** — deaths and failures persist across sessions and feed back into planning
-> - **Token budget guard** — enforces a spend ceiling with per-scope accounting, so a stuck agent cannot burn an API quota against a frozen world
-> - **Emotion engine** — drives voice tone and prompt framing from current state
-> - **Presentation timeline** — sequences speech against broadcast delay so commentary matches what viewers see
-> - **Quest tracker HUD** — milestone chapters rendered for a stream overlay
-> - **Cancellation** — `AbortSignal`-based, so a superseded action stops instead of finishing pointlessly
-
-> ### Engineering records
+> **Verified on live runs (47 gates):** finding and collecting wood · crafting table · wooden pickaxe
+> and sword · cobblestone · stone pickaxe · furnace · smelting charcoal · torches · escaping caves and
+> enclosed shafts back to the surface · partial food acquisition including fishing · inventory state
+> surviving a short bot restart · token budget holding under a frozen world · deterministic recovery
+> when progress stalls.
+>
+> **Not yet (5 gates, explicitly FAIL):**
+>
+> | Gate | Status |
+> |---|---|
+> | Post-pickaxe stone/iron mining is survival-safe | FAIL |
+> | Full diamond armour reached in a long soak | FAIL |
+> | Safe functional home built and validated | FAIL |
+> | Interior zones and decor | FAIL |
+> | Speech never blocks gameplay-critical work | FAIL |
+>
+> Progression targets for diamond and the ender dragon exist in code, but no run has completed them
+> start to finish. The checklist says so too.
+>
+> ## Relationship to upstream
+>
+> Baseline commit `7af2ee38` marks exactly where upstream ends and this work begins:
+>
+> ```bash
+> git diff 7af2ee38..HEAD --stat
+> ```
+>
+> This branch is **26 commits ahead of, and 1,622 commits behind, `moeru-ai/airi:main`**. It is built on
+> AIRI as of roughly February 2026, not on current upstream. Treat it as a research branch: re-basing
+> onto today's upstream would be a substantial merge, and that is a deliberate trade — the autonomy work
+> needed a stable base to run long soak tests against.
+>
+> ## What this fork adds
+>
+> | Area | What it does |
+> |---|---|
+> | `services/minecraft/src/autonomy/` | Objective selection from world state, inference-lane scheduling, run metrics, knowledge retrieval, failure memory, emotion, commentary, YouTube live-chat intake |
+> | `services/minecraft/src/libs/fabric-bridge/` | Talks to the Fabric mod — bot proxy that survives short restarts, pathfinding wrapper, session resume tolerant of a late listener |
+> | `services/minecraft-fabric-mod/` | The Minecraft-side mod, so the agent reads real inventory and block state instead of inferring it |
+> | `services/minecraft/src/libs/llm-agent/` | Plan locking against concurrent replanning, canonical world-state prompt view, persona handling |
+> | `services/minecraft/src/libs/llm-usage/` | Token budget guard with free-tier enforcement and per-scope accounting |
+> | `services/minecraft/src/skills/` | Gathering, crafting, combat, navigation and recovery actions |
+> | `services/minecraft/src/plugins/` | Monitor dashboard, first-person browser viewer, quest tracker HUD |
+> | `services/minecraft/scripts/` | Long soak runs, monitoring, auto-restart, debug capture |
+> | `apps/connect-four-arena/` | **Persona Four** — LLM-vs-LLM Connect Four for comparing persona prompts on identical game state |
+>
+> ### How the decision layers split
+>
+> Emergencies cannot wait for an LLM round-trip, so they do not use one:
+>
+> - **Reflex layer** — fleeing mobs, escaping lava, eating when starving, emergency combat, cancelling a superseded action via `AbortSignal`. Immediate, no model call.
+> - **LLM layer** — what to aim for next, given equipment, hunger, terrain, nearby resources and past failures.
+>
+> There is a rule-based fallback for when the model is unavailable. That is *not* the same as a fixed
+> progression script: [code_review.md](code_review.md) audits specifically that no hardcoded
+> `wood → stone → iron → diamond` sequence, no seed-specific coordinates and no benchmark-only branch
+> exist in the production decision path.
+>
+> ### Streaming
+>
+> Game video is delayed by a few seconds so the LLM and TTS can generate ahead of it. Viewers see the
+> event and the reaction at the same time. Short danger exclamations are pre-generated and played
+> instantly; longer commentary is generated behind them. Emotion state — fear, excitement, irritation,
+> pride, boredom — drifts over time and colours both voice and prompt framing.
+>
+> ## Engineering records
 >
 > The parts most worth reading are the logs, not the code:
 >
 > - **[AUTONOMY_WORKLOG.md](AUTONOMY_WORKLOG.md)** — every live soak run recorded as *live observations → hypothesis → changes*, with the run log and screenshot each conclusion came from.
-> - **[AUTONOMY_BENCHMARKS.md](AUTONOMY_BENCHMARKS.md)** — stage gates with PASS/FAIL status and the reasoning behind each verdict.
-> - **[AUTONOMY_CHECKLIST.md](AUTONOMY_CHECKLIST.md)** — open work, stated honestly, including what is still blocked and why.
-> - **[code_review.md](code_review.md)** — a self-audit checking that no fixed `wood → stone → iron → diamond` script, no seed-specific coordinates, and no benchmark-only branch leaked into the production autonomy path.
+> - **[AUTONOMY_BENCHMARKS.md](AUTONOMY_BENCHMARKS.md)** — 52 stage gates with PASS/FAIL and the reasoning behind each verdict.
+> - **[AUTONOMY_CHECKLIST.md](AUTONOMY_CHECKLIST.md)** — open work, stated honestly, including what is blocked and why.
+> - **[code_review.md](code_review.md)** — the hardcode and recovery audit described above.
+> - **[services/minecraft/docs/autonomous-vtuber.md](services/minecraft/docs/autonomous-vtuber.md)** — full environment-variable reference. Note it predates the emotion engine, token budget guard and Fabric bridge; this README is the current summary.
 >
-> ### Not included in this repository, deliberately
+> Note that [services/minecraft/README.md](services/minecraft/README.md) is largely upstream's and
+> describes the original command-driven bot.
+>
+> ## Not included in this repository, deliberately
 >
 > | Excluded | Reason |
 > |---|---|
@@ -84,7 +163,7 @@
 > | `runtime/` soak logs and screenshots | Local run artefacts; the worklog is the durable record |
 > | All `.env` files with real values | Only `local-dev` placeholders and empty keys are tracked |
 >
-> ### Status
+> ## Status
 >
 > Work in progress, and the checklist says so. Some stages are verified live; others are blocked on
 > sandbox restrictions documented in the worklog. Nothing here claims to be finished.
