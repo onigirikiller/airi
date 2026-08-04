@@ -21,8 +21,8 @@ send-mode:
   ctrl-enter: Ctrl + Enter
   double-enter: Enter + Enter
 speech-output:
-  mute: 靜音語音
-  unmute: 恢復語音
+  mute: Mute voice
+  unmute: Unmute voice
 operations:
   load-models: 載入模型
   load-models-status:

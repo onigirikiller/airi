@@ -21,8 +21,8 @@ send-mode:
   ctrl-enter: Ctrl + Enter
   double-enter: Enter二回
 speech-output:
-  mute: 音声をミュート
-  unmute: ミュートを解除
+  mute: Mute voice
+  unmute: Unmute voice
 operations:
   load-models: モデルの読み込み
   load-models-status:

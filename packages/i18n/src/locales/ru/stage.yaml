@@ -21,8 +21,8 @@ send-mode:
   ctrl-enter: Ctrl + Enter
   double-enter: Двойной Enter
 speech-output:
-  mute: Отключить озвучивание
-  unmute: Включить озвучивание
+  mute: Mute voice
+  unmute: Unmute voice
 operations:
   load-models: Загрузить модели
   load-models-status:
