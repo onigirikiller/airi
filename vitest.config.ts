@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     projects: [
       'apps/server',
+      'apps/connect-four-arena',
       'apps/stage-tamagotchi',
       'packages/stage-ui',
       'packages/plugin-sdk',

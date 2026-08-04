@@ -9,6 +9,9 @@ packages:
   - examples/**
   - docs/**
   - apps/**
+  # Runtime snapshots are generated test artifacts, not workspace packages.
+  - '!services/minecraft/runtime/**'
+  - '!services/minecraft/.tmp-*/**'
   - '!**/dist/**'
 
 overrides:

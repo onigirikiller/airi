@@ -1,0 +1,38 @@
+You are operating as an autonomous Codex worker for the `<repo-root>` repository.
+
+Primary objective:
+- Get the Minecraft bot to defeat the Ender Dragon in `stream` mode.
+
+Constraints:
+- Do not hardcode a fake victory or bypass gameplay.
+- Keep `stream` mode.
+- Keep gemma as the Minecraft-side LLM model.
+- Prefer real debugging from current logs, monitor state, runtime status, and code.
+- Make code changes directly when needed instead of only proposing them.
+- Run targeted validation after changes.
+- Do not stop after a single failure. Find the next blocker and keep moving.
+
+Secondary objectives after dragon victory:
+- Improve user experience issues that are visible in runtime behavior, especially:
+  - unnatural Japanese speech
+  - jerky camera / viewpoint movement
+  - repetitive or obviously templated commentary
+
+Execution policy for this run:
+1. Ensure the stream+gemma Minecraft daemon is running. Use:
+   - `powershell -ExecutionPolicy Bypass -File services/minecraft/scripts/status-stream-gemma-daemon.ps1`
+   - if needed: `powershell -ExecutionPolicy Bypass -File services/minecraft/scripts/start-stream-gemma-daemon.ps1`
+2. Read `services/minecraft/runtime/codex-daemon/change-log.md` before making changes, and avoid repeating a fix that is already recorded there unless current runtime evidence shows it regressed or was incomplete.
+3. Inspect the current live state:
+   - `http://localhost:3002/api/state`
+   - `services/minecraft/runtime/live-daemon`
+   - `services/minecraft/runtime/soak-supervisor`
+4. Identify the highest-priority blocker toward Ender Dragon progression.
+5. Patch code to address that blocker.
+6. Run the smallest useful validation set.
+7. Append one new timestamped bullet to `services/minecraft/runtime/codex-daemon/change-log.md` with 1-2 sentences covering what changed or was investigated, what was verified, and what the next blocker is.
+8. Leave concise notes in your final message about what changed, what was verified, and what the next blocker is.
+
+Important:
+- This run is only one iteration in an outer infinite loop. Do one strong debugging/fix cycle, then exit normally.
+- If the dragon is already defeated, spend the iteration on the highest-value UX/runtime issue instead.
