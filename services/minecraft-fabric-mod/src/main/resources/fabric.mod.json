@@ -4,7 +4,7 @@
   "version": "${version}",
   "name": "AIRI MC Bridge",
   "description": "WebSocket bridge for AI-controlled Minecraft gameplay",
-  "authors": ["AIRI Project"],
+  "authors": ["onigirikiller"],
   "contact": {},
   "license": "MIT",
   "icon": "",

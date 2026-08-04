@@ -1,4 +1,18 @@
 #!/usr/bin/env python3
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# NOTE ON LICENSING - this file is NOT under the repository's MIT licence.
+#
+# It imports Style-Bert-VITS2 (https://github.com/litagin02/Style-Bert-VITS2) directly, which is
+# licensed under AGPL-3.0. This wrapper is therefore distributed under AGPL-3.0-or-later, and if you
+# run a modified version of it as a network service you must offer the corresponding source to your
+# users. The rest of this repository remains MIT; see THIRD_PARTY_NOTICES.md for the boundary.
+#
+# If you want to avoid AGPL obligations entirely, do not use this wrapper. Run the official
+# Style-Bert-VITS2 server as a separate process and point LOCAL_TTS_BASEURL at it instead - the
+# agent only ever speaks to it over HTTP.
+#
 """
 Minimal Style-Bert-VITS2 HTTP server compatible with minecraft-bot local TTS.
 

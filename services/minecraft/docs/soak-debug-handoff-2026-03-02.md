@@ -106,8 +106,8 @@ Changes:
 
 These were already copied before the reboot:
 
-- `C:\\Users\\yoshi\\AppData\\Roaming\\.minecraft\\mods\\airi-mcbridge-0.1.0.jar`
-- `C:\\Users\\yoshi\\AppData\\Roaming\\.minecraft\\mods\\baritone-unoptimized-fabric-1.10.4.jar`
+- `%APPDATA%\\.minecraft\\mods\\airi-mcbridge-0.1.0.jar`
+- `%APPDATA%\\.minecraft\\mods\\baritone-unoptimized-fabric-1.10.4.jar`
 
 ## What should be true after reboot
 
@@ -124,7 +124,7 @@ After restarting Minecraft and reopening the world, the following should happen:
 ## First things to check after reboot
 
 1. Minecraft log:
-   - `C:\\Users\\yoshi\\AppData\\Roaming\\.minecraft\\logs\\latest.log`
+   - `%APPDATA%\\.minecraft\\logs\\latest.log`
    - Confirm the loaded bridge build matches the newly copied mod jar.
 
 2. Supervisor status:

@@ -168,6 +168,9 @@
 > | `runtime/` soak logs and screenshots | Local run artefacts; the worklog is the durable record |
 > | All `.env` files with real values | Only `local-dev` placeholders and empty keys are tracked |
 >
+> Full licence boundary, including the one file in this repository that is **not** MIT, is recorded in
+> **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**.
+>
 > ## Status
 >
 > Work in progress, and the checklist says so. Some stages are verified live; others are blocked on

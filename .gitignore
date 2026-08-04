@@ -123,3 +123,13 @@ plugins-development
 
 #ia
 GEMINI.md
+
+# Python bytecode (this fork adds tools/*.py)
+__pycache__/
+*.py[cod]
+
+# Local environment overrides — never commit real values
+.env.local
+.env.*.local
+**/.env.local
+**/.env.*.local
