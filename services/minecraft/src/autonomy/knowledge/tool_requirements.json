@@ -1,0 +1,32 @@
+{
+  "mining_requirements": {
+    "stone": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "cobblestone": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "coal_ore": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "copper_ore": { "minTool": "stone_pickaxe", "tier": 1 },
+    "iron_ore": { "minTool": "stone_pickaxe", "tier": 1 },
+    "lapis_lazuli_ore": { "minTool": "stone_pickaxe", "tier": 1 },
+    "gold_ore": { "minTool": "iron_pickaxe", "tier": 2 },
+    "redstone_ore": { "minTool": "iron_pickaxe", "tier": 2 },
+    "diamond_ore": { "minTool": "iron_pickaxe", "tier": 2 },
+    "emerald_ore": { "minTool": "iron_pickaxe", "tier": 2 },
+    "obsidian": { "minTool": "diamond_pickaxe", "tier": 3 },
+    "deepslate": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "nether_quartz_ore": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "nether_gold_ore": { "minTool": "wooden_pickaxe", "tier": 0 },
+    "ancient_debris": { "minTool": "diamond_pickaxe", "tier": 3 }
+  },
+  "tier_names": ["wood", "stone", "iron", "diamond"],
+  "pickaxe_by_tier": [
+    "wooden_pickaxe",
+    "stone_pickaxe",
+    "iron_pickaxe",
+    "diamond_pickaxe"
+  ],
+  "cave_prep": {
+    "minTorches": 4,
+    "minFoodItems": 2,
+    "requiresSword": true,
+    "minHealthForEntry": 10
+  }
+}

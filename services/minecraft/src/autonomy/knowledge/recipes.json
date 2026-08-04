@@ -1,0 +1,115 @@
+{
+  "crafting_table": {
+    "ingredients": { "oak_planks": 4 },
+    "requires_table": false,
+    "note": "Any planks work (oak, spruce, birch, etc.)"
+  },
+  "oak_planks": {
+    "ingredients": { "oak_log": 1 },
+    "output_count": 4,
+    "requires_table": false,
+    "note": "Any log→planks variant works"
+  },
+  "stick": {
+    "ingredients": { "oak_planks": 2 },
+    "output_count": 4,
+    "requires_table": false
+  },
+  "wooden_pickaxe": {
+    "ingredients": { "oak_planks": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "wooden_axe": {
+    "ingredients": { "oak_planks": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "wooden_sword": {
+    "ingredients": { "oak_planks": 2, "stick": 1 },
+    "requires_table": true
+  },
+  "stone_pickaxe": {
+    "ingredients": { "cobblestone": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "stone_axe": {
+    "ingredients": { "cobblestone": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "stone_sword": {
+    "ingredients": { "cobblestone": 2, "stick": 1 },
+    "requires_table": true
+  },
+  "iron_pickaxe": {
+    "ingredients": { "iron_ingot": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "iron_axe": {
+    "ingredients": { "iron_ingot": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "iron_sword": {
+    "ingredients": { "iron_ingot": 2, "stick": 1 },
+    "requires_table": true
+  },
+  "diamond_pickaxe": {
+    "ingredients": { "diamond": 3, "stick": 2 },
+    "requires_table": true
+  },
+  "diamond_helmet": {
+    "ingredients": { "diamond": 5 },
+    "requires_table": true
+  },
+  "diamond_chestplate": {
+    "ingredients": { "diamond": 8 },
+    "requires_table": true
+  },
+  "diamond_leggings": {
+    "ingredients": { "diamond": 7 },
+    "requires_table": true
+  },
+  "diamond_boots": {
+    "ingredients": { "diamond": 4 },
+    "requires_table": true
+  },
+  "furnace": {
+    "ingredients": { "cobblestone": 8 },
+    "requires_table": true
+  },
+  "torch": {
+    "ingredients": { "stick": 1, "coal": 1 },
+    "output_count": 4,
+    "requires_table": false
+  },
+  "chest": {
+    "ingredients": { "oak_planks": 8 },
+    "requires_table": true
+  },
+  "shield": {
+    "ingredients": { "iron_ingot": 1, "oak_planks": 6 },
+    "requires_table": true
+  },
+  "bread": {
+    "ingredients": { "wheat": 3 },
+    "requires_table": true
+  },
+  "iron_helmet": {
+    "ingredients": { "iron_ingot": 5 },
+    "requires_table": true
+  },
+  "iron_chestplate": {
+    "ingredients": { "iron_ingot": 8 },
+    "requires_table": true
+  },
+  "iron_leggings": {
+    "ingredients": { "iron_ingot": 7 },
+    "requires_table": true
+  },
+  "iron_boots": {
+    "ingredients": { "iron_ingot": 4 },
+    "requires_table": true
+  },
+  "bucket": {
+    "ingredients": { "iron_ingot": 3 },
+    "requires_table": true
+  }
+}
