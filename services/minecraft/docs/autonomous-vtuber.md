@@ -1,25 +1,40 @@
 # Autonomous VTuber Setup (Minecraft Service)
 
-This document describes the new autonomous streaming features added to `services/minecraft`.
+**Scope: this document is the environment-variable reference.** For what the autonomy layer does,
+what is verified and what is not, and how to start it, see the fork section at the top of the
+[root README](../../../README.md). Feature descriptions are kept in one place on purpose, so they
+cannot drift apart.
 
-## Features Added
+## Models
 
-- Structured autonomy decision provider with fallback rule logic
-- Optional Gemini Live speech synthesis pass-through (Minecraft -> AIRI Stage)
-- YouTube Live Chat polling + optional reply posting
-- AI first-person browser viewer via `prismarine-viewer`
-- Autonomous orchestration loop with social/comment weighting
+What this repository ships as defaults, in `services/minecraft/.env`:
+
+| Role | Default |
+|---|---|
+| Planning / chat (`LLM_MODEL`) | `gemma4:e4b` via Ollama at `http://localhost:11434/v1` |
+| Autonomy decisions (`AUTONOMY_LLM_MODEL`) | `gemma4:e4b`, same endpoint |
+| Gemini HTTP path (`GEMINI_HTTP_MODEL`) | `gemini-2.5-flash` |
+| Gemini live speech (`GEMINI_LIVE_MODEL`) | `gemini-2.5-flash-native-audio-preview-12-2025` |
+
+Any OpenAI-compatible endpoint works — Ollama, LM Studio, or a hosted API. The author has run the
+agent on a fine-tuned Gemma 3 12B and, more recently, on Gemma 4 E4B.
+
+> **A caveat worth stating plainly:** `AUTONOMY_BENCHMARKS.md` records PASS/FAIL per gate but does not
+> record which model produced each verdict, and neither does `AUTONOMY_WORKLOG.md`. So the benchmark
+> results should be read as "this behaviour was reachable with a small local model in this class",
+> not as a claim about a specific model version. Pinning the model per run is an open improvement.
 
 ## Environment Variables
 
-Add these to `services/minecraft/.env.local` (or `.env`).
+Add these to **`services/minecraft/.env.local`**. Do not put real values in `.env` — that file is
+tracked by git and would be published on your next commit.
 
 ```env
 # Primary LLM config (for planning/chat agents)
 LLM_API_KEY=
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-5.4-mini
-LLM_REASONING_MODEL=gpt-5.4-mini
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=gemma4:e4b
+LLM_REASONING_MODEL=gemma4:e4b
 
 # Minecraft bot connection
 BOT_USERNAME=aira
@@ -34,8 +49,8 @@ AIRI_CLIENT_NAME=minecraft-bot
 # Autonomous decision LLM
 AUTONOMY_LLM_ENABLED=true
 AUTONOMY_LLM_API_KEY=
-AUTONOMY_LLM_BASE_URL=https://api.openai.com/v1
-AUTONOMY_LLM_MODEL=gpt-5.4-mini
+AUTONOMY_LLM_BASE_URL=http://localhost:11434/v1
+AUTONOMY_LLM_MODEL=gemma4:e4b
 AUTONOMY_LLM_LIVE_MODEL=
 AUTONOMY_LLM_USE_LIVE_API=false
 AUTONOMY_LLM_TEMPERATURE=0.6

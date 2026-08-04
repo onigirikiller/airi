@@ -91,6 +91,11 @@
 > | Interior zones and decor | FAIL |
 > | Speech never blocks gameplay-critical work | FAIL |
 >
+> **What the benchmarks do not tell you:** neither the benchmark file nor the worklog records which
+> model produced each verdict. Read the results as "reachable with a small local model in this
+> class" — the author has run it on a fine-tuned Gemma 3 12B and on Gemma 4 E4B — not as a claim
+> about a specific model version. Pinning the model per run is an open improvement.
+>
 > Progression targets for diamond and the ender dragon exist in code, but no run has completed them
 > start to finish. The checklist says so too.
 >
