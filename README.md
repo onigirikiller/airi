@@ -23,6 +23,48 @@
 > | `services/minecraft/src/skills/` | Gathering, crafting, combat, navigation and recovery actions |
 > | `apps/connect-four-arena/` | **Persona Four** — two LLM personas play Connect Four sharing one board but with isolated conversation histories, so persona prompts can be compared on identical game state |
 >
+> ### How to run it
+>
+> **Setup guide: [`services/minecraft/docs/autonomous-vtuber.md`](services/minecraft/docs/autonomous-vtuber.md)** —
+> every environment variable, with defaults.
+>
+> Note that [`services/minecraft/README.md`](services/minecraft/README.md) is upstream's and describes
+> the original command-driven bot, not this autonomy layer.
+>
+> You need four things running:
+>
+> | # | Component | Notes |
+> |---|---|---|
+> | 1 | **Minecraft 1.20.4 + Fabric** with the bridge mod | Build it from [`services/minecraft-fabric-mod/`](services/minecraft-fabric-mod) — that README covers the Baritone jars you must supply yourself |
+> | 2 | **An OpenAI-compatible LLM endpoint** | Ollama, LM Studio or a hosted API. Runs have used `gemma4:e4b` locally and Gemini Flash remotely |
+> | 3 | **A local TTS server** (optional) | `tools/style-bert-vits2-server.py` or `tools/irodori-tts-server.py`; skip for a silent agent |
+> | 4 | **The agent itself** | `pnpm -F @proj-airi/minecraft-bot dev`, or `start-airi-minecraft.bat` on Windows, which starts the viewer, HUD and monitor ports too |
+>
+> Configuration goes in `services/minecraft/.env.local` — never `.env`, which is tracked. Start from
+> the setup guide's variable list.
+>
+> **Persona Four** is independent of all of the above and is the quickest thing to try:
+>
+> ```bash
+> pnpm -F @proj-airi/connect-four-arena dev
+> ```
+>
+> It defaults to LM Studio's OpenAI-compatible endpoint at `http://localhost:1234/v1/`. Start LM Studio
+> with CORS enabled, open the arena, and two personas will play each other.
+>
+> ### What the autonomy layer actually does
+>
+> Beyond upstream's command-driven bot, this fork makes the agent decide for itself:
+>
+> - **Objective selection** — picks its own next goal from world state rather than following a fixed progression script, with the hardcode audit in [`code_review.md`](code_review.md) checking that no fixed `wood → stone → iron → diamond` fallback crept back in
+> - **Survival reflexes** — event-driven responses that pre-empt the planner when health or light drops
+> - **Lesson memory** — deaths and failures persist across sessions and feed back into planning
+> - **Token budget guard** — enforces a spend ceiling with per-scope accounting, so a stuck agent cannot burn an API quota against a frozen world
+> - **Emotion engine** — drives voice tone and prompt framing from current state
+> - **Presentation timeline** — sequences speech against broadcast delay so commentary matches what viewers see
+> - **Quest tracker HUD** — milestone chapters rendered for a stream overlay
+> - **Cancellation** — `AbortSignal`-based, so a superseded action stops instead of finishing pointlessly
+
 > ### Engineering records
 >
 > The parts most worth reading are the logs, not the code:
