@@ -176,7 +176,7 @@
 > | `runtime/` soak logs and screenshots | Local run artefacts; the worklog is the durable record |
 > | Real API keys and tokens | Tracked `.env` files carry public defaults and placeholders only; real values belong in gitignored `.env.local`. Each tracked `.env` says so in a header. |
 >
-> Full licence boundary, including the one file in this repository that is **not** MIT, is recorded in
+> Full licence boundaries, including all non-MIT files and bundled tools, are recorded in
 > **[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)**.
 >
 > ## Status

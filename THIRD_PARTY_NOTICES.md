@@ -18,10 +18,14 @@ is more useful than a takedown.
 ### On separating from AGPL
 
 Running the **official** Style-Bert-VITS2 server as its own process and pointing
-`LOCAL_TTS_BASEURL` at it keeps AGPL code out of this repository — the agent only ever talks to a TTS
-backend over HTTP. That separates *this project* from AGPL obligations. It does **not** make the
-official server itself MIT: Style-Bert-VITS2 remains AGPL-licensed however you run it, and AGPL
-section 13 still applies to a modified version you expose over a network.
+`LOCAL_TTS_BASEURL` at it avoids importing AGPL code into the MIT-licensed agent process — the agent
+only ever talks to a TTS backend over HTTP. That is a separation of *processes and code linkage*, and
+it is worth being precise about what it does not do:
+
+- **This repository remains mixed-licence** while `tools/style-bert-vits2-server.py` is present. Only
+  moving that file out to its own repository would let anyone say AGPL code has been excluded here.
+- **The official Style-Bert-VITS2 server remains AGPL-licensed** however you run it, and AGPL section
+  13 still applies to a modified version you expose over a network.
 
 ## Upstream
 
@@ -36,7 +40,7 @@ These are imported by code in this repository but installed separately by the us
 | Dependency | Licence | Notes |
 |---|---|---|
 | [Style-Bert-VITS2](https://github.com/litagin02/Style-Bert-VITS2) | AGPL-3.0 | See the exception above. |
-| [Irodori-TTS](https://github.com/Aratako/Irodori-TTS) | MIT | [`tools/irodori-tts-server.py`](tools/irodori-tts-server.py) imports `irodori_tts.inference_runtime` directly (inside `_load_runtime`, not at module scope) and exposes it through a local HTTP API. Because Irodori-TTS is MIT, this wrapper can remain MIT provided the upstream copyright notice and licence conditions are honoured. Not vendored. |
+| [Irodori-TTS](https://github.com/Aratako/Irodori-TTS) | MIT | [`tools/irodori-tts-server.py`](tools/irodori-tts-server.py) imports `irodori_tts.inference_runtime` directly inside `load_irodori_symbols`, rather than at module scope, and exposes it through a local HTTP API. Because Irodori-TTS is MIT, this wrapper can remain MIT provided the upstream copyright notice and licence conditions are honoured. Not vendored. |
 | [huggingface_hub](https://github.com/huggingface/huggingface_hub) | Apache-2.0 | Used by the Irodori wrapper to fetch model files. |
 
 ## Not redistributed here — supply these yourself
@@ -60,10 +64,17 @@ each remains under its own licence.
 
 ## Tracked `.env` files
 
-Several `.env` files are tracked by git — deliberately, because they carry public defaults. Each
-service loads `--env-file=.env` first and `--env-file-if-exists=.env.local` second, so `.env.local`
-overrides them and is gitignored.
+Several `.env` files are tracked by git — deliberately, because they carry public defaults.
+**Tracked `.env` files contain public defaults and placeholders only.** All six carry a warning
+header saying so.
 
-**Tracked `.env` files contain public defaults and placeholders only.** Real API keys and tokens
-belong in `.env.local`. Every tracked `.env` in this fork's active area carries a warning header
-saying so.
+Use gitignored `.env.local` files where the relevant app or service supports them, and check that
+package's startup script for its exact loading behaviour — it is not uniform across the monorepo:
+
+| Package | Mechanism |
+|---|---|
+| `services/minecraft`, `services/discord-bot`, `services/satori-bot`, `services/telegram-bot` | Node `--env-file=.env --env-file-if-exists=.env.local`, so `.env.local` overrides |
+| `apps/server` | `dotenvx run -f .env -f .env.local --overload` via the `apply:env` script — used by `dev`, `auth:generate` and `db:push`, but **not** by `start`, which runs `tsx src/app.ts` with no env loading |
+| `packages/stage-ui` | No env loading in its own scripts |
+
+**Never place real API keys or tokens in a tracked `.env` file.**
