@@ -107,10 +107,11 @@
 > git diff 7af2ee38..HEAD --stat
 > ```
 >
-> This branch is **26 commits ahead of, and 1,622 commits behind, `moeru-ai/airi:main`**. It is built on
-> AIRI as of roughly February 2026, not on current upstream. Treat it as a research branch: re-basing
-> onto today's upstream would be a substantial merge, and that is a deliberate trade — the autonomy work
-> needed a stable base to run long soak tests against.
+> This branch has **substantially diverged** from current upstream — see the live
+> [compare view](https://github.com/moeru-ai/airi/compare/main...onigirikiller:airi:feat/autonomous-vtuber-overhaul)
+> for exact numbers. It is built on AIRI as of roughly February 2026, not on current upstream. Treat it
+> as a research branch: re-basing onto today's upstream would be a substantial merge, and that is a
+> deliberate trade — the autonomy work needed a stable base to run long soak tests against.
 >
 > ## What this fork adds
 >
@@ -133,8 +134,15 @@
 > - **Reflex layer** — fleeing mobs, escaping lava, eating when starving, emergency combat, cancelling a superseded action via `AbortSignal`. Immediate, no model call.
 > - **LLM layer** — what to aim for next, given equipment, hunger, terrain, nearby resources and past failures.
 >
-> There is a rule-based fallback for when the model is unavailable. That is *not* the same as a fixed
-> progression script: [code_review.md](code_review.md) audits specifically that no hardcoded
+> **What happens when the model fails.** A `RuleBasedAutonomyDecisionProvider` exists and is
+> unit-tested, but it is deliberately *not* wired into the production orchestrator as an LLM-failure
+> fallback — `orchestrator.decision-fallback.test.ts` asserts `fallbackDecisionProvider` is
+> `undefined`. If the model is unreachable or its output cannot be parsed, the agent emits a no-op
+> intent and skips goal selection for that tick rather than quietly substituting rule-based play. The
+> reflex layer keeps running, so the agent still survives; it just stops making new long-term
+> decisions until the model answers again.
+>
+> Separately, [code_review.md](code_review.md) audits that no hardcoded
 > `wood → stone → iron → diamond` sequence, no seed-specific coordinates and no benchmark-only branch
 > exist in the production decision path.
 >

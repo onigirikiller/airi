@@ -14,7 +14,7 @@ if not defined JAVA_HOME (
         echo Using Android Studio JBR: %JAVA_HOME%
     ) else (
         echo ERROR: JAVA_HOME not set and Android Studio JBR not found.
-        echo Please install JDK 21 and set JAVA_HOME.
+        echo Please install JDK 17 and set JAVA_HOME.
         exit /b 1
     )
 )
